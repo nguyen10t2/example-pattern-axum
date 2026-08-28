@@ -1,7 +1,7 @@
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::common::{MockExpenseRepository, MockGroupRepository, test_cache};
+use crate::common::{MockExpenseRepository, MockGroupRepository, test_cache, test_pool};
 use dsa::domain::{
     Currency, GroupRole, SplitType,
     expenses::{
@@ -13,6 +13,7 @@ use dsa::domain::{
 };
 
 #[tokio::test]
+#[ignore = "requires a live Postgres test database (set TEST_DATABASE_URL) because ExpenseService::create opens a real transaction"]
 async fn test_expense_creation_and_authorization() {
     let group_id = Uuid::now_v7();
     let u1 = Uuid::now_v7();
@@ -38,7 +39,7 @@ async fn test_expense_creation_and_authorization() {
     let expense_repo = MockExpenseRepository::default();
     let cache = test_cache();
 
-    let service = ExpenseService::new(expense_repo, group_repo, cache);
+    let service = ExpenseService::new(expense_repo, group_repo, cache, test_pool());
 
     // Outsider cannot create expense
     let outsider_attempt = service

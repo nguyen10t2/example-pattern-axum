@@ -1,7 +1,7 @@
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::common::{MockGroupRepository, MockSettlementRepository, test_cache};
+use crate::common::{MockGroupRepository, MockSettlementRepository, test_cache, test_pool};
 use dsa::domain::{
     Currency, GroupRole,
     groups::entity::GroupMemberWithUser,
@@ -35,7 +35,7 @@ async fn test_settlement_lifecycle_and_permissions() {
     let settlement_repo = MockSettlementRepository::default();
     let cache = test_cache();
 
-    let service = SettlementService::new(settlement_repo, group_repo, cache);
+    let service = SettlementService::new(settlement_repo, group_repo, cache, test_pool());
 
     // Outsider creation fails
     let outsider_res = service

@@ -57,10 +57,10 @@ impl AppState {
         let jwt_config = JwtConfig::from_env();
         let google_oauth = GoogleOAuthConfig::from_env();
 
-        let user_repo = PostgresUserRepository::new(pool.clone());
-        let expense_repo = PostgresExpenseRepository::new(pool.clone());
-        let group_repo = PostgresGroupRepository::new(pool.clone());
-        let settlement_repo = PostgresSettlementRepository::new(pool.clone());
+        let user_repo = PostgresUserRepository::new();
+        let expense_repo = PostgresExpenseRepository::new();
+        let group_repo = PostgresGroupRepository::new();
+        let settlement_repo = PostgresSettlementRepository::new();
 
         let mailer = Mailer::new(128);
 
@@ -70,6 +70,7 @@ impl AppState {
             argon2_arc.clone(),
             jwt_config.clone(),
             mailer,
+            pool.clone(),
         ));
 
         let group_service = Arc::new(GroupService::new(
@@ -78,12 +79,14 @@ impl AppState {
             settlement_repo.clone(),
             user_repo.clone(),
             cache.clone(),
+            pool.clone(),
         ));
 
-        let expense_service = Arc::new(ExpenseService::new(expense_repo.clone(), group_repo.clone(), cache.clone()));
+        let expense_service =
+            Arc::new(ExpenseService::new(expense_repo.clone(), group_repo.clone(), cache.clone(), pool.clone()));
 
         let settlement_service =
-            Arc::new(SettlementService::new(settlement_repo.clone(), group_repo.clone(), cache.clone()));
+            Arc::new(SettlementService::new(settlement_repo.clone(), group_repo.clone(), cache.clone(), pool.clone()));
 
         Self {
             user_service,

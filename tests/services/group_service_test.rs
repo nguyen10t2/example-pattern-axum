@@ -2,7 +2,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::common::{
-    MockExpenseRepository, MockGroupRepository, MockSettlementRepository, MockUserRepository, test_cache,
+    MockExpenseRepository, MockGroupRepository, MockSettlementRepository, MockUserRepository, test_cache, test_pool,
 };
 use dsa::domain::{
     Currency, SplitType,
@@ -11,6 +11,7 @@ use dsa::domain::{
 };
 
 #[tokio::test]
+#[ignore = "requires a live Postgres test database (set TEST_DATABASE_URL) because GroupService::create opens a real transaction"]
 async fn test_group_lifecycle_and_summary() {
     let group_repo = MockGroupRepository::default();
     let expense_repo = MockExpenseRepository::default();
@@ -24,6 +25,7 @@ async fn test_group_lifecycle_and_summary() {
         settlement_repo.clone(),
         user_repo.clone(),
         cache.clone(),
+        test_pool(),
     );
 
     let creator_id = Uuid::now_v7();

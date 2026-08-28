@@ -24,6 +24,7 @@ use crate::{
         random::generate_otp,
     },
 };
+use sqlx::PgPool;
 
 pub struct UserService<R: UserRepository> {
     repo: R,
@@ -31,6 +32,7 @@ pub struct UserService<R: UserRepository> {
     argon2: Arc<Argon2<'static>>,
     jwt_config: JwtConfig,
     mailer: Mailer,
+    pool: PgPool,
 }
 
 impl<R: UserRepository> UserService<R> {
@@ -40,12 +42,13 @@ impl<R: UserRepository> UserService<R> {
         argon2: Arc<Argon2<'static>>,
         jwt_config: JwtConfig,
         mailer: Mailer,
+        pool: PgPool,
     ) -> Self {
-        Self { repo, cache, argon2, jwt_config, mailer }
+        Self { repo, cache, argon2, jwt_config, mailer, pool }
     }
 
     pub async fn request_otp(&self, email: &str) -> Result<(), AppError> {
-        let existing_user = self.repo.find_by_email(email).await?;
+        let existing_user = self.repo.find_by_email(&self.pool, email).await?;
         if existing_user.is_some() {
             return Err(AppError::Business(BusinessError::UserAlreadyExists));
         }
@@ -87,7 +90,7 @@ impl<R: UserRepository> UserService<R> {
 
         let created_user = self
             .repo
-            .create(&new_user)
+            .create(&self.pool, &new_user)
             .await
             .map_err(|err| map_unique_violation(err, &[("email", &new_user.email)]))?;
 
@@ -98,7 +101,7 @@ impl<R: UserRepository> UserService<R> {
     }
 
     pub async fn sign_in(&self, data: SignInRequest) -> Result<TokensResponse, AppError> {
-        let user = self.repo.find_by_email(&data.email).await?;
+        let user = self.repo.find_by_email(&self.pool, &data.email).await?;
         let Some(user) = user else {
             warn!(email = %data.email, "Failed sign-in attempt: Email not found");
             return Err(AppError::Business(BusinessError::InvalidCredentials));
@@ -124,23 +127,28 @@ impl<R: UserRepository> UserService<R> {
             return Err(AppError::Business(BusinessError::EmailNotVerified));
         }
 
-        let user = match self.repo.find_by_google_id(&google_user.sub).await? {
+        let user = match self.repo.find_by_google_id(&self.pool, &google_user.sub).await? {
             Some(mut user) => {
                 if let Some(ref avatar) = google_user.picture
                     && user.avatar_url.as_ref() != Some(avatar)
                 {
                     user = self
                         .repo
-                        .update(user.id, &UpdateUserEntity { avatar_url: Some(avatar.clone()), ..Default::default() })
+                        .update(
+                            &self.pool,
+                            user.id,
+                            &UpdateUserEntity { avatar_url: Some(avatar.clone()), ..Default::default() },
+                        )
                         .await?;
                 }
                 user
             }
-            None => match self.repo.find_by_email(&google_user.email).await? {
+            None => match self.repo.find_by_email(&self.pool, &google_user.email).await? {
                 Some(user) => {
                     let updated = self
                         .repo
                         .update(
+                            &self.pool,
                             user.id,
                             &UpdateUserEntity {
                                 google_id: Some(google_user.sub.clone()),
@@ -166,7 +174,7 @@ impl<R: UserRepository> UserService<R> {
                         preferred_currency: Currency::VND,
                         is_active: true,
                     };
-                    let created = self.repo.create(&new_user).await?;
+                    let created = self.repo.create(&self.pool, &new_user).await?;
                     info!(user_id = %created.id, email = %created.email, "Created new user via Google Sign-In");
                     created
                 }
@@ -247,7 +255,7 @@ impl<R: UserRepository> UserService<R> {
             return Ok(cached);
         }
 
-        let user = self.repo.find_by_id(id).await?;
+        let user = self.repo.find_by_id(&self.pool, id).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(id.to_string())))?;
 
         let response = UserMapper::to_response(&user);
@@ -257,7 +265,7 @@ impl<R: UserRepository> UserService<R> {
     }
 
     pub async fn find_by_email(&self, email: &str) -> Result<UserResponse, AppError> {
-        let user = self.repo.find_by_email(email).await?;
+        let user = self.repo.find_by_email(&self.pool, email).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(email.to_string())))?;
         Ok(UserMapper::to_response(&user))
     }
@@ -271,7 +279,7 @@ impl<R: UserRepository> UserService<R> {
             ..Default::default()
         };
 
-        let updated_user = self.repo.update(id, &update_entity).await?;
+        let updated_user = self.repo.update(&self.pool, id, &update_entity).await?;
         let response = UserMapper::to_response(&updated_user);
 
         let key = format!("user:{}", id);
@@ -281,7 +289,7 @@ impl<R: UserRepository> UserService<R> {
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<(), AppError> {
-        let result = self.repo.soft_delete(id).await?;
+        let result = self.repo.soft_delete(&self.pool, id).await?;
         if result.is_none() {
             return Err(AppError::Business(BusinessError::UserNotFound(id.to_string())));
         }
@@ -292,7 +300,7 @@ impl<R: UserRepository> UserService<R> {
     }
 
     pub async fn change_password(&self, user_id: Uuid, data: ChangePasswordRequest) -> Result<(), AppError> {
-        let user = self.repo.find_by_id(user_id).await?;
+        let user = self.repo.find_by_id(&self.pool, user_id).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(user_id.to_string())))?;
 
         let Some(password_hash) = user.password_hash else {
@@ -305,7 +313,9 @@ impl<R: UserRepository> UserService<R> {
         }
 
         let new_hash = hash_password(&self.argon2, data.new_password).await?;
-        self.repo.update(user_id, &UpdateUserEntity { password_hash: Some(new_hash), ..Default::default() }).await?;
+        self.repo
+            .update(&self.pool, user_id, &UpdateUserEntity { password_hash: Some(new_hash), ..Default::default() })
+            .await?;
 
         // Invalidate active sessions
         let session_key = format!("sessions:{}", user_id);
@@ -322,7 +332,7 @@ impl<R: UserRepository> UserService<R> {
     }
 
     pub async fn request_forgot_password_otp(&self, email: &str) -> Result<(), AppError> {
-        let user = self.repo.find_by_email(email).await?;
+        let user = self.repo.find_by_email(&self.pool, email).await?;
         if user.is_none() {
             return Ok(()); // Prevent email enumeration
         }
@@ -345,11 +355,13 @@ impl<R: UserRepository> UserService<R> {
             _ => return Err(AppError::Business(BusinessError::InvalidOtp)),
         }
 
-        let user = self.repo.find_by_email(&data.email).await?;
+        let user = self.repo.find_by_email(&self.pool, &data.email).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(data.email.clone())))?;
 
         let new_hash = hash_password(&self.argon2, data.new_password).await?;
-        self.repo.update(user.id, &UpdateUserEntity { password_hash: Some(new_hash), ..Default::default() }).await?;
+        self.repo
+            .update(&self.pool, user.id, &UpdateUserEntity { password_hash: Some(new_hash), ..Default::default() })
+            .await?;
 
         // Invalidate all active sessions
         let session_key = format!("sessions:{}", user.id);

@@ -20,16 +20,18 @@ use crate::{
     errors::{AppError, BusinessError},
     utils::cache::CacheStore,
 };
+use sqlx::PgPool;
 
 pub struct ExpenseService<ER: ExpenseRepository, GR: GroupRepository> {
     expense_repo: ER,
     group_repo: GR,
     cache: Arc<dyn CacheStore>,
+    pool: PgPool,
 }
 
 impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
-    pub fn new(expense_repo: ER, group_repo: GR, cache: Arc<dyn CacheStore>) -> Self {
-        Self { expense_repo, group_repo, cache }
+    pub fn new(expense_repo: ER, group_repo: GR, cache: Arc<dyn CacheStore>, pool: PgPool) -> Self {
+        Self { expense_repo, group_repo, cache, pool }
     }
 
     pub async fn create(&self, data: CreateExpenseRequest, created_by_id: Uuid) -> Result<ExpenseResponse, AppError> {
@@ -52,7 +54,9 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
             expense_date,
         };
 
-        let expense = self.expense_repo.create(&new_expense).await?;
+        let mut tx = self.pool.begin().await?;
+
+        let expense = self.expense_repo.create(&mut *tx, &new_expense).await?;
 
         let new_shares: Vec<NewExpenseShareEntity> = data
             .shares
@@ -66,7 +70,9 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
             })
             .collect();
 
-        let shares = self.expense_repo.create_shares(&new_shares).await?;
+        let shares = self.expense_repo.create_shares(&mut *tx, &new_shares).await?;
+
+        tx.commit().await?;
 
         // Invalidate group summary cache
         self.cache.delete(&format!("group_summary:{}", data.group_id)).await;
@@ -79,7 +85,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
     }
 
     async fn validate_creation(&self, data: &CreateExpenseRequest, created_by_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(data.group_id).await?;
+        let members = self.group_repo.find_members(&self.pool, data.group_id).await?;
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
         if !member_ids.contains(&created_by_id) {
@@ -117,15 +123,15 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
     }
 
     pub async fn find_by_id(&self, id: Uuid, current_user_id: Option<Uuid>) -> Result<ExpenseResponse, AppError> {
-        let expense = self.expense_repo.find_by_id(id).await?;
+        let expense = self.expense_repo.find_by_id(&self.pool, id).await?;
         let expense = expense.ok_or(AppError::Business(BusinessError::ExpenseNotFound))?;
 
         let ((), shares) = if let Some(user_id) = current_user_id {
             tokio::try_join!(self.ensure_membership(expense.group_id, user_id), async {
-                self.expense_repo.find_shares_by_expense(id).await.map_err(AppError::from)
+                self.expense_repo.find_shares_by_expense(&self.pool, id).await.map_err(AppError::from)
             })?
         } else {
-            ((), self.expense_repo.find_shares_by_expense(id).await?)
+            ((), self.expense_repo.find_shares_by_expense(&self.pool, id).await?)
         };
 
         let share_responses = shares.iter().map(ExpenseMapper::to_share_response_with_user).collect();
@@ -139,12 +145,12 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         current_user_id: Uuid,
         pagination: PaginationQuery,
     ) -> Result<PaginatedResponse<ExpenseResponse>, AppError> {
-        self.ensure_membership(group_id, current_user_id).await?;
-
         let limit = pagination.limit();
         let offset = pagination.offset();
 
-        let (items, total) = self.expense_repo.find_by_group(group_id, limit, offset).await?;
+        let ((), (items, total)) = tokio::try_join!(self.ensure_membership(group_id, current_user_id), async {
+            self.expense_repo.find_by_group(&self.pool, group_id, limit, offset).await.map_err(AppError::from)
+        },)?;
 
         let response_items = items.iter().map(|e| ExpenseMapper::to_response_with_payer(e, None)).collect();
 
@@ -152,10 +158,10 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
     }
 
     pub async fn delete_expense(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
-        let expense = self.expense_repo.find_by_id(id).await?;
+        let expense = self.expense_repo.find_by_id(&self.pool, id).await?;
         let expense = expense.ok_or(AppError::Business(BusinessError::ExpenseNotFound))?;
 
-        let members = self.group_repo.find_members(expense.group_id).await?;
+        let members = self.group_repo.find_members(&self.pool, expense.group_id).await?;
         let member = members.iter().find(|m| m.user_id == current_user_id);
 
         let Some(member) = member else {
@@ -166,7 +172,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
             return Err(AppError::Business(BusinessError::DeletePermissionDenied));
         }
 
-        self.expense_repo.soft_delete(id).await?;
+        self.expense_repo.soft_delete(&self.pool, id).await?;
         self.cache.delete(&format!("group_summary:{}", expense.group_id)).await;
 
         info!(expense_id = %id, deleted_by = %current_user_id, "Expense deleted");
@@ -174,7 +180,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
     }
 
     async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(group_id).await?;
+        let members = self.group_repo.find_members(&self.pool, group_id).await?;
         if !members.iter().any(|m| m.user_id == user_id) {
             return Err(AppError::Business(BusinessError::NotGroupMember));
         }

@@ -6,23 +6,26 @@ use crate::domain::expenses::{
     repository::ExpenseRepository,
 };
 use async_trait::async_trait;
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
-#[derive(Clone)]
-pub struct PostgresExpenseRepository {
-    pool: sqlx::PgPool,
-}
+#[derive(Clone, Default)]
+pub struct PostgresExpenseRepository;
 
 impl PostgresExpenseRepository {
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 #[async_trait]
 impl ExpenseRepository for PostgresExpenseRepository {
-    async fn create(&self, data: &NewExpenseEntity) -> Result<ExpenseEntity, sqlx::Error> {
-        sqlx::query_as::<_, ExpenseEntity>(
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        data: &NewExpenseEntity,
+    ) -> Result<ExpenseEntity, sqlx::Error> {
+        sqlx::query_as::<Postgres, ExpenseEntity>(
             "INSERT INTO expenses (
                 id, group_id, created_by_id, payer_id, amount,
                 currency, description, split_type, expense_date
@@ -39,11 +42,15 @@ impl ExpenseRepository for PostgresExpenseRepository {
         .bind(&data.description)
         .bind(data.split_type)
         .bind(data.expense_date)
-        .fetch_one(&self.pool)
+        .fetch_one(executor)
         .await
     }
 
-    async fn create_shares(&self, shares: &[NewExpenseShareEntity]) -> Result<Vec<ExpenseShareEntity>, sqlx::Error> {
+    async fn create_shares<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        shares: &[NewExpenseShareEntity],
+    ) -> Result<Vec<ExpenseShareEntity>, sqlx::Error> {
         if shares.is_empty() {
             return Ok(vec![]);
         }
@@ -54,7 +61,7 @@ impl ExpenseRepository for PostgresExpenseRepository {
         let amounts: Vec<i64> = shares.iter().map(|s| s.share_amount).collect();
         let percentages: Vec<Option<i32>> = shares.iter().map(|s| s.share_percentage).collect();
 
-        sqlx::query_as::<_, ExpenseShareEntity>(
+        sqlx::query_as::<Postgres, ExpenseShareEntity>(
             "INSERT INTO expense_shares (id, expense_id, user_id, share_amount, share_percentage)
              SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::uuid[], $4::bigint[], $5::integer[])
              RETURNING *",
@@ -64,12 +71,16 @@ impl ExpenseRepository for PostgresExpenseRepository {
         .bind(&user_ids)
         .bind(&amounts)
         .bind(&percentages)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<ExpenseWithPayer>, sqlx::Error> {
-        sqlx::query_as::<_, ExpenseWithPayer>(
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<ExpenseWithPayer>, sqlx::Error> {
+        sqlx::query_as::<Postgres, ExpenseWithPayer>(
             "SELECT e.id, e.group_id, e.created_by_id, e.payer_id, u.full_name AS payer_name,
                     e.amount, e.currency, e.description, e.split_type, e.expense_date,
                     e.deleted_at, e.created_at, e.updated_at
@@ -78,12 +89,13 @@ impl ExpenseRepository for PostgresExpenseRepository {
              WHERE e.id = $1 AND e.deleted_at IS NULL",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
     }
 
-    async fn find_by_group(
+    async fn find_by_group<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
         &self,
+        executor: E,
         group_id: Uuid,
         limit: i64,
         offset: i64,
@@ -91,10 +103,10 @@ impl ExpenseRepository for PostgresExpenseRepository {
         let count_row: (i64,) =
             sqlx::query_as("SELECT COUNT(*)::bigint FROM expenses WHERE group_id = $1 AND deleted_at IS NULL")
                 .bind(group_id)
-                .fetch_one(&self.pool)
+                .fetch_one(executor)
                 .await?;
 
-        let items = sqlx::query_as::<_, ExpenseWithPayer>(
+        let items = sqlx::query_as::<Postgres, ExpenseWithPayer>(
             "SELECT e.id, e.group_id, e.created_by_id, e.payer_id, u.full_name AS payer_name,
                     e.amount, e.currency, e.description, e.split_type, e.expense_date,
                     e.deleted_at, e.created_at, e.updated_at
@@ -107,20 +119,24 @@ impl ExpenseRepository for PostgresExpenseRepository {
         .bind(group_id)
         .bind(limit)
         .bind(offset)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await?;
 
         Ok((items, count_row.0))
     }
 
-    async fn find_by_group_with_shares(&self, group_id: Uuid) -> Result<Vec<ExpenseWithSharesEntity>, sqlx::Error> {
-        let expenses = sqlx::query_as::<_, ExpenseEntity>(
+    async fn find_by_group_with_shares<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
+        &self,
+        executor: E,
+        group_id: Uuid,
+    ) -> Result<Vec<ExpenseWithSharesEntity>, sqlx::Error> {
+        let expenses = sqlx::query_as::<Postgres, ExpenseEntity>(
             "SELECT * FROM expenses
              WHERE group_id = $1 AND deleted_at IS NULL
              ORDER BY expense_date DESC",
         )
         .bind(group_id)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await?;
 
         if expenses.is_empty() {
@@ -128,12 +144,12 @@ impl ExpenseRepository for PostgresExpenseRepository {
         }
 
         let expense_ids: Vec<Uuid> = expenses.iter().map(|e| e.id).collect();
-        let all_shares = sqlx::query_as::<_, ExpenseShareEntity>(
+        let all_shares = sqlx::query_as::<Postgres, ExpenseShareEntity>(
             "SELECT * FROM expense_shares
              WHERE expense_id = ANY($1)",
         )
         .bind(&expense_ids)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await?;
 
         let mut results = Vec::with_capacity(expenses.len());
@@ -145,8 +161,12 @@ impl ExpenseRepository for PostgresExpenseRepository {
         Ok(results)
     }
 
-    async fn find_shares_by_expense(&self, expense_id: Uuid) -> Result<Vec<ExpenseShareWithUser>, sqlx::Error> {
-        sqlx::query_as::<_, ExpenseShareWithUser>(
+    async fn find_shares_by_expense<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        expense_id: Uuid,
+    ) -> Result<Vec<ExpenseShareWithUser>, sqlx::Error> {
+        sqlx::query_as::<Postgres, ExpenseShareWithUser>(
             "SELECT es.id, es.expense_id, es.user_id, u.full_name AS user_name,
                     es.share_amount, es.share_percentage, es.created_at, es.updated_at
              FROM expense_shares es
@@ -154,19 +174,23 @@ impl ExpenseRepository for PostgresExpenseRepository {
              WHERE es.expense_id = $1",
         )
         .bind(expense_id)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<ExpenseEntity>, sqlx::Error> {
-        sqlx::query_as::<_, ExpenseEntity>(
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<ExpenseEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, ExpenseEntity>(
             "UPDATE expenses
              SET deleted_at = now()
              WHERE id = $1 AND deleted_at IS NULL
              RETURNING *",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
     }
 }

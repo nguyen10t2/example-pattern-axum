@@ -16,16 +16,18 @@ use crate::{
     errors::{AppError, BusinessError},
     utils::cache::CacheStore,
 };
+use sqlx::PgPool;
 
 pub struct SettlementService<SR: SettlementRepository, GR: GroupRepository> {
     settlement_repo: SR,
     group_repo: GR,
     cache: Arc<dyn CacheStore>,
+    pool: PgPool,
 }
 
 impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
-    pub fn new(settlement_repo: SR, group_repo: GR, cache: Arc<dyn CacheStore>) -> Self {
-        Self { settlement_repo, group_repo, cache }
+    pub fn new(settlement_repo: SR, group_repo: GR, cache: Arc<dyn CacheStore>, pool: PgPool) -> Self {
+        Self { settlement_repo, group_repo, cache, pool }
     }
 
     pub async fn create(
@@ -33,7 +35,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         data: CreateSettlementRequest,
         current_user_id: Uuid,
     ) -> Result<SettlementResponse, AppError> {
-        let members = self.group_repo.find_members(data.group_id).await?;
+        let members = self.group_repo.find_members(&self.pool, data.group_id).await?;
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
         if !member_ids.contains(&current_user_id) {
@@ -54,7 +56,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
             settled_at: data.settled_at.unwrap_or_else(Utc::now),
         };
 
-        let settlement = self.settlement_repo.create(&new_settlement).await?;
+        let settlement = self.settlement_repo.create(&self.pool, &new_settlement).await?;
 
         // Invalidate group summary cache
         self.cache.delete(&format!("group_summary:{}", data.group_id)).await;
@@ -70,7 +72,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
     }
 
     pub async fn find_by_id(&self, id: Uuid, current_user_id: Uuid) -> Result<SettlementResponse, AppError> {
-        let settlement = self.settlement_repo.find_by_id(id).await?;
+        let settlement = self.settlement_repo.find_by_id(&self.pool, id).await?;
         let settlement = settlement.ok_or(AppError::Business(BusinessError::SettlementNotFound))?;
 
         self.ensure_membership(settlement.group_id, current_user_id).await?;
@@ -83,12 +85,15 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         current_user_id: Uuid,
         pagination: PaginationQuery,
     ) -> Result<PaginatedResponse<SettlementResponse>, AppError> {
-        self.ensure_membership(group_id, current_user_id).await?;
-
         let limit = pagination.limit();
         let offset = pagination.offset();
 
-        let (items, total) = self.settlement_repo.find_paginated_by_group(group_id, limit, offset).await?;
+        let ((), (items, total)) = tokio::try_join!(self.ensure_membership(group_id, current_user_id), async {
+            self.settlement_repo
+                .find_paginated_by_group(&self.pool, group_id, limit, offset)
+                .await
+                .map_err(AppError::from)
+        },)?;
 
         let response_items = SettlementMapper::to_response_list_with_users(&items);
 
@@ -96,10 +101,10 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
     }
 
     pub async fn cancel_settlement(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
-        let settlement = self.settlement_repo.find_by_id(id).await?;
+        let settlement = self.settlement_repo.find_by_id(&self.pool, id).await?;
         let settlement = settlement.ok_or(AppError::Business(BusinessError::SettlementNotFound))?;
 
-        let members = self.group_repo.find_members(settlement.group_id).await?;
+        let members = self.group_repo.find_members(&self.pool, settlement.group_id).await?;
         let member = members.iter().find(|m| m.user_id == current_user_id);
 
         let Some(member) = member else {
@@ -113,7 +118,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
             return Err(AppError::Business(BusinessError::DeletePermissionDenied));
         }
 
-        self.settlement_repo.soft_delete(id).await?;
+        self.settlement_repo.soft_delete(&self.pool, id).await?;
         self.cache.delete(&format!("group_summary:{}", settlement.group_id)).await;
 
         info!(settlement_id = %id, deleted_by = %current_user_id, "Settlement cancelled");
@@ -121,7 +126,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
     }
 
     async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(group_id).await?;
+        let members = self.group_repo.find_members(&self.pool, group_id).await?;
         if !members.iter().any(|m| m.user_id == user_id) {
             return Err(AppError::Business(BusinessError::NotGroupMember));
         }

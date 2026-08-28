@@ -3,23 +3,26 @@ use crate::domain::settlements::{
     repository::SettlementRepository,
 };
 use async_trait::async_trait;
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
-#[derive(Clone)]
-pub struct PostgresSettlementRepository {
-    pool: sqlx::PgPool,
-}
+#[derive(Clone, Default)]
+pub struct PostgresSettlementRepository;
 
 impl PostgresSettlementRepository {
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 #[async_trait]
 impl SettlementRepository for PostgresSettlementRepository {
-    async fn create(&self, data: &NewSettlementEntity) -> Result<SettlementEntity, sqlx::Error> {
-        sqlx::query_as::<_, SettlementEntity>(
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        data: &NewSettlementEntity,
+    ) -> Result<SettlementEntity, sqlx::Error> {
+        sqlx::query_as::<Postgres, SettlementEntity>(
             "INSERT INTO settlements (
                 id, group_id, sender_id, receiver_id, amount, currency, settled_at
             )
@@ -33,26 +36,37 @@ impl SettlementRepository for PostgresSettlementRepository {
         .bind(data.amount)
         .bind(data.currency)
         .bind(data.settled_at)
-        .fetch_one(&self.pool)
+        .fetch_one(executor)
         .await
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<SettlementEntity>, sqlx::Error> {
-        sqlx::query_as::<_, SettlementEntity>("SELECT * FROM settlements WHERE id = $1 AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await
-    }
-
-    async fn find_by_group(&self, group_id: Uuid) -> Result<Vec<SettlementEntity>, sqlx::Error> {
-        sqlx::query_as::<_, SettlementEntity>("SELECT * FROM settlements WHERE group_id = $1 AND deleted_at IS NULL")
-            .bind(group_id)
-            .fetch_all(&self.pool)
-            .await
-    }
-
-    async fn find_paginated_by_group(
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<SettlementEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, SettlementEntity>("SELECT * FROM settlements WHERE id = $1 AND deleted_at IS NULL")
+            .bind(id)
+            .fetch_optional(executor)
+            .await
+    }
+
+    async fn find_by_group<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
+        &self,
+        executor: E,
+        group_id: Uuid,
+    ) -> Result<Vec<SettlementEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, SettlementEntity>(
+            "SELECT * FROM settlements WHERE group_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(group_id)
+        .fetch_all(executor)
+        .await
+    }
+
+    async fn find_paginated_by_group<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
+        &self,
+        executor: E,
         group_id: Uuid,
         limit: i64,
         offset: i64,
@@ -60,10 +74,10 @@ impl SettlementRepository for PostgresSettlementRepository {
         let count_row: (i64,) =
             sqlx::query_as("SELECT COUNT(*)::bigint FROM settlements WHERE group_id = $1 AND deleted_at IS NULL")
                 .bind(group_id)
-                .fetch_one(&self.pool)
+                .fetch_one(executor)
                 .await?;
 
-        let items = sqlx::query_as::<_, SettlementWithUsers>(
+        let items = sqlx::query_as::<Postgres, SettlementWithUsers>(
             "SELECT s.id, s.group_id, s.sender_id, u_sender.full_name AS sender_name,
                     s.receiver_id, u_receiver.full_name AS receiver_name,
                     s.amount, s.currency, s.settled_at, s.deleted_at, s.created_at, s.updated_at
@@ -77,21 +91,25 @@ impl SettlementRepository for PostgresSettlementRepository {
         .bind(group_id)
         .bind(limit)
         .bind(offset)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await?;
 
         Ok((items, count_row.0))
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<SettlementEntity>, sqlx::Error> {
-        sqlx::query_as::<_, SettlementEntity>(
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<SettlementEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, SettlementEntity>(
             "UPDATE settlements
              SET deleted_at = now()
              WHERE id = $1 AND deleted_at IS NULL
              RETURNING *",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
     }
 }

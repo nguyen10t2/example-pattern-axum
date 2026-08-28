@@ -3,44 +3,61 @@ use crate::domain::users::{
     repository::UserRepository,
 };
 use async_trait::async_trait;
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
-#[derive(Clone)]
-pub struct PostgresUserRepository {
-    pool: sqlx::PgPool,
-}
+#[derive(Clone, Default)]
+pub struct PostgresUserRepository;
 
 impl PostgresUserRepository {
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<UserEntity>, sqlx::Error> {
-        sqlx::query_as::<_, UserEntity>("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL")
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, UserEntity>("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(executor)
             .await
     }
 
-    async fn find_by_email(&self, email: &str) -> Result<Option<UserEntity>, sqlx::Error> {
-        sqlx::query_as::<_, UserEntity>("SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL")
-            .bind(email)
-            .fetch_optional(&self.pool)
-            .await
+    async fn find_by_email<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        email: &str,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, UserEntity>(
+            "SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
+        )
+        .bind(email)
+        .fetch_optional(executor)
+        .await
     }
 
-    async fn find_by_google_id(&self, google_id: &str) -> Result<Option<UserEntity>, sqlx::Error> {
-        sqlx::query_as::<_, UserEntity>("SELECT * FROM users WHERE google_id = $1 AND deleted_at IS NULL")
+    async fn find_by_google_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        google_id: &str,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, UserEntity>("SELECT * FROM users WHERE google_id = $1 AND deleted_at IS NULL")
             .bind(google_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(executor)
             .await
     }
 
-    async fn create(&self, user: &NewUserEntity) -> Result<UserEntity, sqlx::Error> {
-        sqlx::query_as::<_, UserEntity>(
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        user: &NewUserEntity,
+    ) -> Result<UserEntity, sqlx::Error> {
+        sqlx::query_as::<Postgres, UserEntity>(
             "INSERT INTO users (
                 id, full_name, email, email_verified, password_hash,
                 google_id, avatar_url, phone, phone_verified, preferred_currency, is_active
@@ -59,12 +76,17 @@ impl UserRepository for PostgresUserRepository {
         .bind(user.phone_verified)
         .bind(user.preferred_currency)
         .bind(user.is_active)
-        .fetch_one(&self.pool)
+        .fetch_one(executor)
         .await
     }
 
-    async fn update(&self, id: Uuid, data: &UpdateUserEntity) -> Result<UserEntity, sqlx::Error> {
-        sqlx::query_as::<_, UserEntity>(
+    async fn update<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+        data: &UpdateUserEntity,
+    ) -> Result<UserEntity, sqlx::Error> {
+        sqlx::query_as::<Postgres, UserEntity>(
             "UPDATE users
              SET
                 full_name = COALESCE($1, full_name),
@@ -86,19 +108,23 @@ impl UserRepository for PostgresUserRepository {
         .bind(data.preferred_currency)
         .bind(data.is_active)
         .bind(id)
-        .fetch_one(&self.pool)
+        .fetch_one(executor)
         .await
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<UserEntity>, sqlx::Error> {
-        sqlx::query_as::<_, UserEntity>(
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, UserEntity>(
             "UPDATE users
              SET deleted_at = now()
              WHERE id = $1 AND deleted_at IS NULL
              RETURNING *",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
     }
 }

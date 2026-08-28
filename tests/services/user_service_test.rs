@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::common::{MockUserRepository, test_argon2, test_cache, test_jwt_config};
+use crate::common::{MockUserRepository, test_argon2, test_cache, test_jwt_config, test_pool};
 use dsa::{
     domain::users::{
         entity::NewUserEntity,
@@ -19,7 +19,7 @@ fn create_test_user_service()
     let argon2 = test_argon2();
     let jwt_config = test_jwt_config();
 
-    let service = UserService::new(repo.clone(), cache.clone(), argon2, jwt_config, Mailer::new(8));
+    let service = UserService::new(repo.clone(), cache.clone(), argon2, jwt_config, Mailer::new(8), test_pool());
     (service, cache, repo)
 }
 
@@ -88,19 +88,22 @@ async fn test_change_and_reset_password() {
     // Setup initial user
     let hash = hash_password(&test_argon2(), "oldpass123".to_string()).await.unwrap();
     let user_id = Uuid::now_v7();
-    repo.create(&NewUserEntity {
-        id: user_id,
-        full_name: "Bob Jones".to_string(),
-        email: "bob@example.com".to_string(),
-        email_verified: true,
-        password_hash: Some(hash),
-        google_id: None,
-        avatar_url: None,
-        phone: None,
-        phone_verified: false,
-        preferred_currency: dsa::domain::Currency::VND,
-        is_active: true,
-    })
+    repo.create(
+        &test_pool(),
+        &NewUserEntity {
+            id: user_id,
+            full_name: "Bob Jones".to_string(),
+            email: "bob@example.com".to_string(),
+            email_verified: true,
+            password_hash: Some(hash),
+            google_id: None,
+            avatar_url: None,
+            phone: None,
+            phone_verified: false,
+            preferred_currency: dsa::domain::Currency::VND,
+            is_active: true,
+        },
+    )
     .await
     .unwrap();
 

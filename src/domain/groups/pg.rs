@@ -6,23 +6,26 @@ use crate::domain::groups::{
     repository::GroupRepository,
 };
 use async_trait::async_trait;
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
-#[derive(Clone)]
-pub struct PostgresGroupRepository {
-    pool: sqlx::PgPool,
-}
+#[derive(Clone, Default)]
+pub struct PostgresGroupRepository;
 
 impl PostgresGroupRepository {
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 #[async_trait]
 impl GroupRepository for PostgresGroupRepository {
-    async fn create(&self, data: &NewGroupEntity) -> Result<GroupEntity, sqlx::Error> {
-        sqlx::query_as::<_, GroupEntity>(
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        data: &NewGroupEntity,
+    ) -> Result<GroupEntity, sqlx::Error> {
+        sqlx::query_as::<Postgres, GroupEntity>(
             "INSERT INTO groups (id, name, description, invite_code, default_currency)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING *",
@@ -32,19 +35,27 @@ impl GroupRepository for PostgresGroupRepository {
         .bind(&data.description)
         .bind(&data.invite_code)
         .bind(data.default_currency)
-        .fetch_one(&self.pool)
+        .fetch_one(executor)
         .await
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error> {
-        sqlx::query_as::<_, GroupEntity>("SELECT * FROM groups WHERE id = $1 AND deleted_at IS NULL")
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<GroupEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, GroupEntity>("SELECT * FROM groups WHERE id = $1 AND deleted_at IS NULL")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(executor)
             .await
     }
 
-    async fn add_member(&self, data: &NewGroupMemberEntity) -> Result<GroupMemberEntity, sqlx::Error> {
-        sqlx::query_as::<_, GroupMemberEntity>(
+    async fn add_member<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        data: &NewGroupMemberEntity,
+    ) -> Result<GroupMemberEntity, sqlx::Error> {
+        sqlx::query_as::<Postgres, GroupMemberEntity>(
             "INSERT INTO group_members (group_id, user_id, role)
              VALUES ($1, $2, $3)
              RETURNING *",
@@ -52,31 +63,43 @@ impl GroupRepository for PostgresGroupRepository {
         .bind(data.group_id)
         .bind(data.user_id)
         .bind(data.role)
-        .fetch_one(&self.pool)
+        .fetch_one(executor)
         .await
     }
 
-    async fn find_members(&self, group_id: Uuid) -> Result<Vec<GroupMemberWithUser>, sqlx::Error> {
-        sqlx::query_as::<_, GroupMemberWithUser>(
+    async fn find_members<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        group_id: Uuid,
+    ) -> Result<Vec<GroupMemberWithUser>, sqlx::Error> {
+        sqlx::query_as::<Postgres, GroupMemberWithUser>(
             "SELECT gm.group_id, gm.user_id, u.full_name, gm.role, gm.joined_at
              FROM group_members gm
              INNER JOIN users u ON gm.user_id = u.id
              WHERE gm.group_id = $1 AND u.deleted_at IS NULL",
         )
         .bind(group_id)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await
     }
 
-    async fn find_by_invite_code(&self, code: &str) -> Result<Option<GroupEntity>, sqlx::Error> {
-        sqlx::query_as::<_, GroupEntity>("SELECT * FROM groups WHERE invite_code = $1 AND deleted_at IS NULL")
+    async fn find_by_invite_code<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        code: &str,
+    ) -> Result<Option<GroupEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, GroupEntity>("SELECT * FROM groups WHERE invite_code = $1 AND deleted_at IS NULL")
             .bind(code)
-            .fetch_optional(&self.pool)
+            .fetch_optional(executor)
             .await
     }
 
-    async fn find_all_by_user(&self, user_id: Uuid) -> Result<Vec<GroupWithBalanceEntity>, sqlx::Error> {
-        sqlx::query_as::<_, GroupWithBalanceEntity>(
+    async fn find_all_by_user<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        user_id: Uuid,
+    ) -> Result<Vec<GroupWithBalanceEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, GroupWithBalanceEntity>(
             r#"
             WITH user_paid AS (
                 SELECT group_id, SUM(amount)::bigint AS total
@@ -128,19 +151,23 @@ impl GroupRepository for PostgresGroupRepository {
             "#,
         )
         .bind(user_id)
-        .fetch_all(&self.pool)
+        .fetch_all(executor)
         .await
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error> {
-        sqlx::query_as::<_, GroupEntity>(
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        id: Uuid,
+    ) -> Result<Option<GroupEntity>, sqlx::Error> {
+        sqlx::query_as::<Postgres, GroupEntity>(
             "UPDATE groups
              SET deleted_at = now()
              WHERE id = $1 AND deleted_at IS NULL
              RETURNING *",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(executor)
         .await
     }
 }

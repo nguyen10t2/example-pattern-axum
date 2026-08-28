@@ -82,10 +82,7 @@ async fn main() {
     info!("Server running on http://{addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .unwrap();
+    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await.unwrap();
 }
 
 async fn shutdown_signal() {

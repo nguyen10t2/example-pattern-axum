@@ -3,6 +3,7 @@
 use argon2::Argon2;
 use async_trait::async_trait;
 use chrono::Utc;
+use sqlx::{Executor, Postgres};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -43,22 +44,38 @@ pub struct MockUserRepository {
 
 #[async_trait]
 impl UserRepository for MockUserRepository {
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<UserEntity>, sqlx::Error> {
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
         let users = self.users.lock().await;
         Ok(users.iter().find(|u| u.id == id && u.deleted_at.is_none()).cloned())
     }
 
-    async fn find_by_email(&self, email: &str) -> Result<Option<UserEntity>, sqlx::Error> {
+    async fn find_by_email<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        email: &str,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
         let users = self.users.lock().await;
         Ok(users.iter().find(|u| u.email.to_lowercase() == email.to_lowercase() && u.deleted_at.is_none()).cloned())
     }
 
-    async fn find_by_google_id(&self, google_id: &str) -> Result<Option<UserEntity>, sqlx::Error> {
+    async fn find_by_google_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        google_id: &str,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
         let users = self.users.lock().await;
         Ok(users.iter().find(|u| u.google_id.as_deref() == Some(google_id) && u.deleted_at.is_none()).cloned())
     }
 
-    async fn create(&self, user: &NewUserEntity) -> Result<UserEntity, sqlx::Error> {
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        user: &NewUserEntity,
+    ) -> Result<UserEntity, sqlx::Error> {
         let mut users = self.users.lock().await;
         let entity = UserEntity {
             id: user.id,
@@ -80,7 +97,12 @@ impl UserRepository for MockUserRepository {
         Ok(entity)
     }
 
-    async fn update(&self, id: Uuid, data: &UpdateUserEntity) -> Result<UserEntity, sqlx::Error> {
+    async fn update<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+        data: &UpdateUserEntity,
+    ) -> Result<UserEntity, sqlx::Error> {
         let mut users = self.users.lock().await;
         let user = users.iter_mut().find(|u| u.id == id).unwrap();
         if let Some(ref name) = data.full_name {
@@ -108,7 +130,11 @@ impl UserRepository for MockUserRepository {
         Ok(user.clone())
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<UserEntity>, sqlx::Error> {
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<UserEntity>, sqlx::Error> {
         let mut users = self.users.lock().await;
         if let Some(user) = users.iter_mut().find(|u| u.id == id && u.deleted_at.is_none()) {
             user.deleted_at = Some(Utc::now());
@@ -130,7 +156,11 @@ pub struct MockGroupRepository {
 
 #[async_trait]
 impl GroupRepository for MockGroupRepository {
-    async fn create(&self, data: &NewGroupEntity) -> Result<GroupEntity, sqlx::Error> {
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        data: &NewGroupEntity,
+    ) -> Result<GroupEntity, sqlx::Error> {
         let entity = GroupEntity {
             id: data.id,
             name: data.name.clone(),
@@ -145,11 +175,19 @@ impl GroupRepository for MockGroupRepository {
         Ok(entity)
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error> {
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<GroupEntity>, sqlx::Error> {
         Ok(self.groups.lock().await.iter().find(|g| g.id == id && g.deleted_at.is_none()).cloned())
     }
 
-    async fn add_member(&self, data: &NewGroupMemberEntity) -> Result<GroupMemberEntity, sqlx::Error> {
+    async fn add_member<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        data: &NewGroupMemberEntity,
+    ) -> Result<GroupMemberEntity, sqlx::Error> {
         self.members.lock().await.push(GroupMemberWithUser {
             group_id: data.group_id,
             user_id: data.user_id,
@@ -160,11 +198,19 @@ impl GroupRepository for MockGroupRepository {
         Ok(GroupMemberEntity { group_id: data.group_id, user_id: data.user_id, role: data.role, joined_at: Utc::now() })
     }
 
-    async fn find_members(&self, group_id: Uuid) -> Result<Vec<GroupMemberWithUser>, sqlx::Error> {
+    async fn find_members<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        group_id: Uuid,
+    ) -> Result<Vec<GroupMemberWithUser>, sqlx::Error> {
         Ok(self.members.lock().await.iter().filter(|m| m.group_id == group_id).cloned().collect())
     }
 
-    async fn find_by_invite_code(&self, code: &str) -> Result<Option<GroupEntity>, sqlx::Error> {
+    async fn find_by_invite_code<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        code: &str,
+    ) -> Result<Option<GroupEntity>, sqlx::Error> {
         Ok(self
             .groups
             .lock()
@@ -174,7 +220,11 @@ impl GroupRepository for MockGroupRepository {
             .cloned())
     }
 
-    async fn find_all_by_user(&self, user_id: Uuid) -> Result<Vec<GroupWithBalanceEntity>, sqlx::Error> {
+    async fn find_all_by_user<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        user_id: Uuid,
+    ) -> Result<Vec<GroupWithBalanceEntity>, sqlx::Error> {
         let members = self.members.lock().await;
         let groups = self.groups.lock().await;
 
@@ -197,7 +247,11 @@ impl GroupRepository for MockGroupRepository {
             .collect())
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error> {
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<GroupEntity>, sqlx::Error> {
         let mut groups = self.groups.lock().await;
         if let Some(g) = groups.iter_mut().find(|g| g.id == id && g.deleted_at.is_none()) {
             g.deleted_at = Some(Utc::now());
@@ -218,7 +272,11 @@ pub struct MockExpenseRepository {
 
 #[async_trait]
 impl ExpenseRepository for MockExpenseRepository {
-    async fn create(&self, data: &NewExpenseEntity) -> Result<ExpenseEntity, sqlx::Error> {
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        data: &NewExpenseEntity,
+    ) -> Result<ExpenseEntity, sqlx::Error> {
         let entity = ExpenseEntity {
             id: data.id,
             group_id: data.group_id,
@@ -237,7 +295,11 @@ impl ExpenseRepository for MockExpenseRepository {
         Ok(entity)
     }
 
-    async fn create_shares(&self, shares: &[NewExpenseShareEntity]) -> Result<Vec<ExpenseShareEntity>, sqlx::Error> {
+    async fn create_shares<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        shares: &[NewExpenseShareEntity],
+    ) -> Result<Vec<ExpenseShareEntity>, sqlx::Error> {
         let mut results = Vec::new();
         for s in shares {
             let entity = ExpenseShareEntity {
@@ -257,7 +319,11 @@ impl ExpenseRepository for MockExpenseRepository {
         Ok(results)
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<ExpenseWithPayer>, sqlx::Error> {
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<ExpenseWithPayer>, sqlx::Error> {
         let expenses = self.expenses.lock().await;
         Ok(expenses.iter().find(|e| e.expense.id == id && e.expense.deleted_at.is_none()).map(|e| ExpenseWithPayer {
             id: e.expense.id,
@@ -276,8 +342,9 @@ impl ExpenseRepository for MockExpenseRepository {
         }))
     }
 
-    async fn find_by_group(
+    async fn find_by_group<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
+        _executor: E,
         group_id: Uuid,
         _limit: i64,
         _offset: i64,
@@ -306,7 +373,11 @@ impl ExpenseRepository for MockExpenseRepository {
         Ok((items, total))
     }
 
-    async fn find_by_group_with_shares(&self, group_id: Uuid) -> Result<Vec<ExpenseWithSharesEntity>, sqlx::Error> {
+    async fn find_by_group_with_shares<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        group_id: Uuid,
+    ) -> Result<Vec<ExpenseWithSharesEntity>, sqlx::Error> {
         Ok(self
             .expenses
             .lock()
@@ -317,7 +388,11 @@ impl ExpenseRepository for MockExpenseRepository {
             .collect())
     }
 
-    async fn find_shares_by_expense(&self, expense_id: Uuid) -> Result<Vec<ExpenseShareWithUser>, sqlx::Error> {
+    async fn find_shares_by_expense<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        expense_id: Uuid,
+    ) -> Result<Vec<ExpenseShareWithUser>, sqlx::Error> {
         let expenses = self.expenses.lock().await;
         if let Some(exp) = expenses.iter().find(|e| e.expense.id == expense_id) {
             Ok(exp
@@ -339,7 +414,11 @@ impl ExpenseRepository for MockExpenseRepository {
         }
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<ExpenseEntity>, sqlx::Error> {
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<ExpenseEntity>, sqlx::Error> {
         let mut expenses = self.expenses.lock().await;
         if let Some(e) = expenses.iter_mut().find(|e| e.expense.id == id && e.expense.deleted_at.is_none()) {
             e.expense.deleted_at = Some(Utc::now());
@@ -360,7 +439,11 @@ pub struct MockSettlementRepository {
 
 #[async_trait]
 impl SettlementRepository for MockSettlementRepository {
-    async fn create(&self, data: &NewSettlementEntity) -> Result<SettlementEntity, sqlx::Error> {
+    async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        data: &NewSettlementEntity,
+    ) -> Result<SettlementEntity, sqlx::Error> {
         let entity = SettlementEntity {
             id: data.id,
             group_id: data.group_id,
@@ -377,18 +460,27 @@ impl SettlementRepository for MockSettlementRepository {
         Ok(entity)
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<SettlementEntity>, sqlx::Error> {
+    async fn find_by_id<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<SettlementEntity>, sqlx::Error> {
         let s = self.settlements.lock().await;
         Ok(s.iter().find(|x| x.id == id && x.deleted_at.is_none()).cloned())
     }
 
-    async fn find_by_group(&self, group_id: Uuid) -> Result<Vec<SettlementEntity>, sqlx::Error> {
+    async fn find_by_group<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        group_id: Uuid,
+    ) -> Result<Vec<SettlementEntity>, sqlx::Error> {
         let s = self.settlements.lock().await;
         Ok(s.iter().filter(|x| x.group_id == group_id && x.deleted_at.is_none()).cloned().collect())
     }
 
-    async fn find_paginated_by_group(
+    async fn find_paginated_by_group<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
+        _executor: E,
         group_id: Uuid,
         _limit: i64,
         _offset: i64,
@@ -416,7 +508,11 @@ impl SettlementRepository for MockSettlementRepository {
         Ok((items, total))
     }
 
-    async fn soft_delete(&self, id: Uuid) -> Result<Option<SettlementEntity>, sqlx::Error> {
+    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        _executor: E,
+        id: Uuid,
+    ) -> Result<Option<SettlementEntity>, sqlx::Error> {
         let mut s = self.settlements.lock().await;
         if let Some(item) = s.iter_mut().find(|x| x.id == id && x.deleted_at.is_none()) {
             item.deleted_at = Some(Utc::now());
@@ -446,4 +542,10 @@ pub fn test_argon2() -> Arc<Argon2<'static>> {
 
 pub fn test_cache() -> Arc<MemoryCache> {
     Arc::new(MemoryCache::new())
+}
+
+pub fn test_pool() -> sqlx::PgPool {
+    sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgres://localhost/dsa_test")
+        .expect("failed to create lazy test pool")
 }
