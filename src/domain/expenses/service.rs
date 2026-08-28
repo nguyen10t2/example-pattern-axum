@@ -1,0 +1,183 @@
+use chrono::Utc;
+use std::{collections::HashSet, sync::Arc};
+use tracing::info;
+use uuid::Uuid;
+
+use crate::{
+    domain::{
+        GroupRole, SplitType,
+        expenses::{
+            entity::{NewExpenseEntity, NewExpenseShareEntity},
+            mapper::ExpenseMapper,
+            repository::ExpenseRepository,
+            request::CreateExpenseRequest,
+            response::ExpenseResponse,
+            strategy::{SplitContext, SplitShareInput, SplitStrategyFactory},
+        },
+        groups::repository::GroupRepository,
+        shared::{PaginatedResponse, PaginationQuery},
+    },
+    errors::{AppError, BusinessError},
+    utils::cache::CacheStore,
+};
+
+pub struct ExpenseService<ER: ExpenseRepository, GR: GroupRepository> {
+    expense_repo: ER,
+    group_repo: GR,
+    cache: Arc<dyn CacheStore>,
+}
+
+impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
+    pub fn new(expense_repo: ER, group_repo: GR, cache: Arc<dyn CacheStore>) -> Self {
+        Self { expense_repo, group_repo, cache }
+    }
+
+    pub async fn create(&self, data: CreateExpenseRequest, created_by_id: Uuid) -> Result<ExpenseResponse, AppError> {
+        // 1. Authorization & Strategy Validation
+        self.validate_creation(&data, created_by_id).await?;
+
+        let expense_id = Uuid::now_v7();
+        let split_type = data.split_type.unwrap_or(SplitType::EQUAL);
+        let expense_date = data.expense_date.unwrap_or_else(Utc::now);
+
+        let new_expense = NewExpenseEntity {
+            id: expense_id,
+            group_id: data.group_id,
+            created_by_id,
+            payer_id: data.payer_id,
+            amount: data.amount,
+            currency: data.currency,
+            description: data.description,
+            split_type,
+            expense_date,
+        };
+
+        let expense = self.expense_repo.create(&new_expense).await?;
+
+        let new_shares: Vec<NewExpenseShareEntity> = data
+            .shares
+            .iter()
+            .map(|s| NewExpenseShareEntity {
+                id: Uuid::now_v7(),
+                expense_id: expense.id,
+                user_id: s.user_id,
+                share_amount: s.share_amount,
+                share_percentage: s.share_percentage,
+            })
+            .collect();
+
+        let shares = self.expense_repo.create_shares(&new_shares).await?;
+
+        // Invalidate group summary cache
+        self.cache.delete(&format!("group_summary:{}", data.group_id)).await;
+
+        info!(expense_id = %expense.id, group_id = %expense.group_id, "Expense created");
+
+        let share_responses = shares.into_iter().map(|s| ExpenseMapper::to_share_response(&s, None)).collect();
+
+        Ok(ExpenseMapper::to_response_from_entity(&expense, None, Some(share_responses)))
+    }
+
+    async fn validate_creation(&self, data: &CreateExpenseRequest, created_by_id: Uuid) -> Result<(), AppError> {
+        let members = self.group_repo.find_members(data.group_id).await?;
+        let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
+
+        if !member_ids.contains(&created_by_id) {
+            return Err(AppError::Business(BusinessError::NotGroupMember));
+        }
+
+        if !member_ids.contains(&data.payer_id) {
+            return Err(AppError::Business(BusinessError::PayerNotInGroup));
+        }
+
+        for share in &data.shares {
+            if !member_ids.contains(&share.user_id) {
+                return Err(AppError::Business(BusinessError::UserNotInGroup(share.user_id.to_string())));
+            }
+        }
+
+        let split_type = data.split_type.unwrap_or(SplitType::EQUAL);
+        let strategy = SplitStrategyFactory::get_strategy(&split_type);
+
+        let context = SplitContext {
+            total_amount: data.amount,
+            shares: data
+                .shares
+                .iter()
+                .map(|s| SplitShareInput {
+                    user_id: s.user_id,
+                    share_amount: s.share_amount,
+                    share_percentage: s.share_percentage,
+                })
+                .collect(),
+        };
+
+        strategy.validate(&context)?;
+        Ok(())
+    }
+
+    pub async fn find_by_id(&self, id: Uuid, current_user_id: Option<Uuid>) -> Result<ExpenseResponse, AppError> {
+        let expense = self.expense_repo.find_by_id(id).await?;
+        let expense = expense.ok_or(AppError::Business(BusinessError::ExpenseNotFound))?;
+
+        let ((), shares) = if let Some(user_id) = current_user_id {
+            tokio::try_join!(self.ensure_membership(expense.group_id, user_id), async {
+                self.expense_repo.find_shares_by_expense(id).await.map_err(AppError::from)
+            })?
+        } else {
+            ((), self.expense_repo.find_shares_by_expense(id).await?)
+        };
+
+        let share_responses = shares.iter().map(ExpenseMapper::to_share_response_with_user).collect();
+
+        Ok(ExpenseMapper::to_response_with_payer(&expense, Some(share_responses)))
+    }
+
+    pub async fn find_by_group(
+        &self,
+        group_id: Uuid,
+        current_user_id: Uuid,
+        pagination: PaginationQuery,
+    ) -> Result<PaginatedResponse<ExpenseResponse>, AppError> {
+        self.ensure_membership(group_id, current_user_id).await?;
+
+        let limit = pagination.limit();
+        let offset = pagination.offset();
+
+        let (items, total) = self.expense_repo.find_by_group(group_id, limit, offset).await?;
+
+        let response_items = items.iter().map(|e| ExpenseMapper::to_response_with_payer(e, None)).collect();
+
+        Ok(PaginatedResponse::new(response_items, total, pagination.page(), limit))
+    }
+
+    pub async fn delete_expense(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
+        let expense = self.expense_repo.find_by_id(id).await?;
+        let expense = expense.ok_or(AppError::Business(BusinessError::ExpenseNotFound))?;
+
+        let members = self.group_repo.find_members(expense.group_id).await?;
+        let member = members.iter().find(|m| m.user_id == current_user_id);
+
+        let Some(member) = member else {
+            return Err(AppError::Business(BusinessError::NotGroupMember));
+        };
+
+        if expense.created_by_id != current_user_id && member.role != GroupRole::ADMIN {
+            return Err(AppError::Business(BusinessError::DeletePermissionDenied));
+        }
+
+        self.expense_repo.soft_delete(id).await?;
+        self.cache.delete(&format!("group_summary:{}", expense.group_id)).await;
+
+        info!(expense_id = %id, deleted_by = %current_user_id, "Expense deleted");
+        Ok(())
+    }
+
+    async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
+        let members = self.group_repo.find_members(group_id).await?;
+        if !members.iter().any(|m| m.user_id == user_id) {
+            return Err(AppError::Business(BusinessError::NotGroupMember));
+        }
+        Ok(())
+    }
+}

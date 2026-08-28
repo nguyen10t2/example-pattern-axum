@@ -1,0 +1,33 @@
+// Auth & Users
+pub const UNAUTHORIZED: &str = "UNAUTHORIZED";
+pub const FORBIDDEN: &str = "FORBIDDEN";
+pub const INVALID_CREDENTIALS: &str = "INVALID_CREDENTIALS";
+pub const USER_ALREADY_EXISTS: &str = "USER_ALREADY_EXISTS";
+pub const USER_NOT_FOUND: &str = "USER_NOT_FOUND";
+pub const INVALID_OTP: &str = "INVALID_OTP";
+pub const INVALID_SESSION: &str = "INVALID_SESSION";
+pub const EMAIL_NOT_VERIFIED: &str = "EMAIL_NOT_VERIFIED";
+pub const INVALID_OLD_PASSWORD: &str = "INVALID_OLD_PASSWORD";
+
+// Groups
+pub const GROUP_NOT_FOUND: &str = "GROUP_NOT_FOUND";
+pub const NOT_GROUP_MEMBER: &str = "NOT_GROUP_MEMBER";
+pub const ADMIN_REQUIRED: &str = "ADMIN_REQUIRED";
+pub const INVALID_INVITE_CODE: &str = "INVALID_INVITE_CODE";
+pub const PAYER_NOT_IN_GROUP: &str = "PAYER_NOT_IN_GROUP";
+pub const USER_NOT_IN_GROUP: &str = "USER_NOT_IN_GROUP";
+pub const USER_ALREADY_IN_GROUP: &str = "USER_ALREADY_IN_GROUP";
+
+// Expenses & Settlements
+pub const EXPENSE_NOT_FOUND: &str = "EXPENSE_NOT_FOUND";
+pub const SETTLEMENT_NOT_FOUND: &str = "SETTLEMENT_NOT_FOUND";
+pub const DELETE_PERMISSION_DENIED: &str = "DELETE_PERMISSION_DENIED";
+
+// General
+pub const BAD_REQUEST: &str = "BAD_REQUEST";
+pub const INTERNAL_SERVER_ERROR: &str = "INTERNAL_SERVER_ERROR";
+pub const NOT_FOUND: &str = "NOT_FOUND";
+pub const VALIDATION_ERROR: &str = "VALIDATION_ERROR";
+pub const TOO_MANY_REQUESTS: &str = "TOO_MANY_REQUESTS";
+pub const SUCCESS: &str = "SUCCESS";
+pub const CONFLICT: &str = "CONFLICT";
