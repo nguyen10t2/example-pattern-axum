@@ -118,7 +118,7 @@ pub async fn handle_signin(
     refresh_cookie.set_path("/");
     refresh_cookie.set_http_only(true);
     refresh_cookie.set_same_site(SameSite::Strict);
-    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION as i64);
+    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
     refresh_cookie.set_expires(expires);
 
     let jar = jar.add(refresh_cookie);
@@ -142,7 +142,7 @@ pub async fn handle_refresh(
     refresh_cookie.set_path("/");
     refresh_cookie.set_http_only(true);
     refresh_cookie.set_same_site(SameSite::Strict);
-    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION as i64);
+    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
     refresh_cookie.set_expires(expires);
 
     let jar = jar.add(refresh_cookie);
@@ -215,7 +215,7 @@ pub async fn handle_google_callback(
     refresh_cookie.set_path("/");
     refresh_cookie.set_http_only(true);
     refresh_cookie.set_same_site(SameSite::Strict);
-    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION as i64);
+    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
     refresh_cookie.set_expires(expires);
 
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| DEFAULT_FRONTEND_URL.to_string());

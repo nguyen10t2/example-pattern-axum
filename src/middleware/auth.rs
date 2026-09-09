@@ -41,6 +41,6 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        parts.extensions.get::<AuthUser>().copied().ok_or(AppError::Business(BusinessError::Unauthorized))
+        parts.extensions.get::<Self>().copied().ok_or(AppError::Business(BusinessError::Unauthorized))
     }
 }

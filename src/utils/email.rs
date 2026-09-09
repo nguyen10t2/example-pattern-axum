@@ -15,6 +15,7 @@ pub struct Mailer {
 }
 
 impl Mailer {
+    #[must_use]
     pub fn new(buffer: usize) -> Self {
         let (sender, mut receiver) = mpsc::channel::<MailMessage>(buffer);
 

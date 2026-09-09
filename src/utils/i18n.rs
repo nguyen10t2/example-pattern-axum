@@ -1,5 +1,6 @@
 use std::{collections::HashMap, hash::BuildHasher};
 
+#[must_use]
 pub fn get_language_from_header(accept_language: Option<&str>) -> String {
     let Some(header) = accept_language else {
         return "vi".to_string();
@@ -38,6 +39,7 @@ pub fn get_language_from_header(accept_language: Option<&str>) -> String {
     "vi".to_string()
 }
 
+#[must_use]
 pub fn t<S: BuildHasher>(key: &str, lang: &str, params: Option<&HashMap<&str, &str, S>>) -> String {
     let template = match lang {
         "en" => translate_en(key),

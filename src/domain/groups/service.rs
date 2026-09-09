@@ -40,7 +40,7 @@ pub struct GroupService<GR: GroupRepository, ER: ExpenseRepository, SR: Settleme
 impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: UserRepository>
     GroupService<GR, ER, SR, UR>
 {
-    pub fn new(
+    pub const fn new(
         group_repo: GR,
         expense_repo: ER,
         settlement_repo: SR,

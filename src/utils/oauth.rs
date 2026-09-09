@@ -34,10 +34,12 @@ impl Default for GoogleOAuthConfig {
 }
 
 impl GoogleOAuthConfig {
+    #[must_use]
     pub fn from_env() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn generate_auth_url(&self, state: &str, code_challenge: &str) -> String {
         format!(
             "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id={}&redirect_uri={}&scope=openid%20profile%20email&state={}&code_challenge={}&code_challenge_method=S256",
@@ -64,10 +66,12 @@ impl GoogleOAuthConfig {
     }
 }
 
+#[must_use]
 pub fn generate_state() -> String {
     Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()
 }
 
+#[must_use]
 pub fn generate_code_verifier() -> String {
     Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()
 }

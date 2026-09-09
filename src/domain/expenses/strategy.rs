@@ -41,7 +41,9 @@ fn validate_equal_distribution(context: &SplitContext) -> Result<(), AppError> {
     if count == 0 {
         return Ok(());
     }
-    let base = context.total_amount.div_euclid(count as i64);
+    let count =
+        i64::try_from(count).map_err(|_| AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())))?;
+    let base = context.total_amount.div_euclid(count);
     let evenly_spread = context.shares.iter().all(|s| s.share_amount == base || s.share_amount == base + 1);
     if evenly_spread { Ok(()) } else { Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string()))) }
 }
@@ -79,6 +81,7 @@ impl SplitStrategy for PercentageSplitStrategy {
 pub struct SplitStrategyFactory;
 
 impl SplitStrategyFactory {
+    #[must_use]
     pub fn get_strategy(split_type: &SplitType) -> Box<dyn SplitStrategy> {
         match split_type {
             SplitType::EQUAL => Box::new(EqualSplitStrategy),

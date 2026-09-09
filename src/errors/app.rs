@@ -20,13 +20,13 @@ pub enum AppError {
 
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
-        AppError::System(SystemError::Database(err))
+        Self::System(SystemError::Database(err))
     }
 }
 
 impl From<jsonwebtoken::errors::Error> for AppError {
     fn from(_err: jsonwebtoken::errors::Error) -> Self {
-        AppError::Business(BusinessError::Unauthorized)
+        Self::Business(BusinessError::Unauthorized)
     }
 }
 
