@@ -62,27 +62,30 @@ Lessons:
 
 ## Phase 3 — Documentation coverage
 
-Branch: `phase3-docs` (stack on Phase 2 tip to avoid conflicts).
+Branch: `phase3-docs` (stacked on Phase 2 tip `1dc2d09`). Status: **DONE — merged into
+`fix-hardening-plan` as `d33ffd8` (code commit `55f967f`).**
 
 Docs style (quy tắc chốt): **tiếng Việt, ngắn gọn 1–2 dòng, đủ hiểu** — không verbose.
 Chỉ docs ở pub fn chuẩn (public API: handlers, services, repos, config, utils dùng chung);
 không docs tràn lan mọi hàm nội bộ. Mỗi docs nói: hàm làm gì + `# Errors` khi trả `Result`.
 
-- [ ] Add `///` doc comments to the 123 public functions missing them
-      (handlers, mappers, service methods, `pg::new()` constructors).
-      Work module by module: `domain/users`, `domain/groups`, `domain/expenses`,
-      `domain/settlements`, `middleware`, `utils`, `config`, `responses`.
-- [ ] Add `# Errors` sections to the 74 `Result`-returning functions missing them
-      (pedantic `missing_errors_doc`).
-- [ ] Justify `async` where non-obvious (AGENTS.md: every async fn must justify why):
-  - `middleware/auth.rs::require_auth` — MUST stay `async` (axum `from_fn` requires
-    it); justify with a comment, do NOT remove.
-  - `utils/email.rs::deliver` — stub awaiting SMTP/provider integration; justify
-    with a comment (or drop `async` until the I/O lands — team decision).
-  - `domain/debt_engine.rs:143,147` — remove `async` (pure computation, no `.await`).
+- [x] `///` + `# Errors` cho toàn bộ pub fn (handlers, services, repos, mappers,
+      middleware, utils, config, errors, responses, state); docs tiếng Anh cũ
+      (config builders, validator, sqlx) rút gọn sang tiếng Việt, giữ bảng env.
+- [x] `missing_errors_doc` về 0; `cargo doc --no-deps` sạch.
+- [x] Bỏ `async` không justify: `DebtEngine` thuần CPU → sync trả giá trị trực tiếp
+      (caller + test gọn theo); `deliver` stub → sync, bỏ `Result` giả
+      (`unnecessary_wraps`).
+- [x] Giữ `async` có justify bằng comment: `require_auth`/`from_request_parts`
+      (axum bắt buộc), `hash_*` (`spawn_blocking`), handlers/services (I/O).
+- [x] Phụ: `MAX_SESSIONS_PER_USER` vào constants (bắt được magic `5`),
+      `hex::encode` → `pub(super)`.
 
-Acceptance: `cargo doc --no-deps` clean under `-D missing-docs -D clippy::missing_errors_doc`
-(or equivalent `RUSTDOCFLAGS`), `cargo test` green.
+Acceptance: `cargo fmt --check`, `cargo test` green, `cargo doc` sạch.
+
+Accepted warning duy nhất (có lý do, không suppress vì AGENTS.md cấm cờ ở production):
+`unused_async_trait_impl` ở `FromRequestParts::from_request_parts` — axum ép signature
+`async`, body không `.await`; đã ghi justification comment tại code.
 
 ## Phase 4 — Test layout and async proofs
 
