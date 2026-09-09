@@ -22,24 +22,11 @@ Viết bằng Rust (edition 2024), framework web Axum, PostgreSQL + Redis.
 
 ## Cấu hình
 
-Copy `.env` từ mẫu sau (file `.env` không commit lên git):
+Copy `.env.example` thành `.env` rồi sửa giá trị cho môi trường của bạn
+(file `.env` không commit lên git):
 
 ```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/splitdebt
-REDIS_URL=redis://127.0.0.1:6379
-
-HOST=0.0.0.0
-PORT=3000
-FRONTEND_URL=http://localhost:5173
-RUST_LOG=dsa=debug,tower_http=debug,axum::rejection=trace
-
-JWT_SECRET=doi-secret-it-nhat-32-ky-tu-tai-day
-JWT_ISSUER=splitdebt
-JWT_AUDIENCE=splitdebt-users
-
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=http://localhost:5173/api/users/auth/google/callback
+cp .env.example .env
 ```
 
 Các giá trị tinh chỉnh thêm (đều có mặc định, xem `src/config/constants.rs`):
