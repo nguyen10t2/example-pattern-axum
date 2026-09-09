@@ -9,16 +9,31 @@ production code.
 
 ## Phase 1 — Quick wins (low risk, no behavior change)
 
-Branch: `phase1-clippy-quick-wins` (from `master`).
+Branch: `phase1-clippy-quick-wins` (from `master`). Status: **DONE — merged into
+`fix-hardening-plan` as `d14f97e` (code commit `0a578db`).**
 
-- [ ] Fix 5× `redundant_clone` in `src/state.rs` (repos/pool cloned on last use — drop the clone).
-- [ ] Merge 7× identical match arms in `src/errors/business.rs` with `|` patterns.
-- [ ] Inline format args ×14 (`format!("{x}")` style), `redundant_closure` ×3
-      (`Cookie::value`, `Clone::clone`), single-pattern `match` → `if let` ×1.
-- [ ] `map_or_else` ×2, `String::new()` ×1, `clone_from` ×3, `HashMap` hasher generality ×1.
+- [x] Fix `redundant_clone` in `src/state.rs` — only repos moved on last use
+      (`user_repo`, `expense_repo`, `settlement_repo`, `group_repo`,
+      `connection_manager`); `cache`/`pool` clones kept (moved into `Self` later).
+- [x] Merge identical match arms in `src/errors/business.rs` with `|` patterns
+      (grouped by status code; merged shared `error_codes` arms).
+- [x] Inline format args (`format!("{x}")`), `redundant_closure` ×3
+      (`Cookie::value`, `Option::cloned`), single-pattern `match` → `if let` ×1.
+- [x] `map_or_else` ×2, `String::new()` ×1, `clone_from` ×3, `HashMap` hasher
+      generality ×1 (generic `S: BuildHasher` + turbofish `None` at 8 call sites).
+- [x] `ignored_unit_patterns` in `main.rs` (`() = ctrl_c => ()`), `needless_raw_string_hashes`
+      in `groups/pg.rs`.
 
 Acceptance: `cargo fmt --check`, `cargo clippy --all-targets` (default) 0 warnings,
-`cargo test` green.
+`cargo test` green. All 12 Phase-1 lint groups verified at 0 via clippy JSON report.
+
+Lessons (do not repeat):
+- Inline format args accept identifiers only — `{data.group_id}` is a compile error;
+  that is why clippy never flagged those lines.
+- Check which clones are last-use per variable, not per line (`cache`/`pool` move
+  into `Self`; E0382 catches mistakes).
+- Stable `fn` cannot have default type params — generic `BuildHasher` requires
+  turbofish `None` at every `None` call site.
 
 ## Phase 2 — Enforce pedantic + nursery, fix mechanical lints
 
