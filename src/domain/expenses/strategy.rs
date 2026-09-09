@@ -22,11 +22,6 @@ pub trait SplitStrategy: Send + Sync {
 }
 
 /// Shared check for amount-based strategies: share amounts must add up to the total.
-///
-/// NOTE: `Equal` and `Exact` intentionally share this today (see strategy tests:
-/// equal split accepts any shares that sum to the total, e.g. 33/33/34).
-/// If equal split should enforce per-share equality (`total / n`), change
-/// `EqualSplitStrategy` only — do not touch this helper.
 fn validate_sum(context: &SplitContext) -> Result<(), AppError> {
     let sum: i64 = context.shares.iter().map(|s| s.share_amount).sum();
     if sum != context.total_amount {
@@ -35,11 +30,28 @@ fn validate_sum(context: &SplitContext) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Enforces an even split: every share must be `floor(total / n)` or `ceil(total / n)`.
+///
+/// Integer totals are rarely divisible (e.g. 100 / 3), so strict per-share
+/// equality is unimplementable — 33/33/34 is a valid equal split while 90/5/5
+/// is not. Combined with [`validate_sum`], this accepts exactly the splits
+/// where the division remainder is spread one unit per share.
+fn validate_equal_distribution(context: &SplitContext) -> Result<(), AppError> {
+    let count = context.shares.len();
+    if count == 0 {
+        return Ok(());
+    }
+    let base = context.total_amount.div_euclid(count as i64);
+    let evenly_spread = context.shares.iter().all(|s| s.share_amount == base || s.share_amount == base + 1);
+    if evenly_spread { Ok(()) } else { Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string()))) }
+}
+
 pub struct EqualSplitStrategy;
 
 impl SplitStrategy for EqualSplitStrategy {
     fn validate(&self, context: &SplitContext) -> Result<(), AppError> {
-        validate_sum(context)
+        validate_sum(context)?;
+        validate_equal_distribution(context)
     }
 }
 
@@ -105,6 +117,55 @@ mod tests {
             ],
         };
         assert!(strategy.validate(&ctx).is_err());
+    }
+
+    #[test]
+    fn test_equal_split_rejects_uneven_shares_with_matching_sum() {
+        let strategy = SplitStrategyFactory::get_strategy(&SplitType::EQUAL);
+        let ctx = SplitContext {
+            total_amount: 100,
+            shares: vec![
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 90, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 5, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 5, share_percentage: None },
+            ],
+        };
+        assert!(strategy.validate(&ctx).is_err());
+    }
+
+    #[test]
+    fn test_equal_split_rejects_shortfall_distribution() {
+        let strategy = SplitStrategyFactory::get_strategy(&SplitType::EQUAL);
+        let ctx = SplitContext {
+            total_amount: 100,
+            shares: vec![
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 33, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 33, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 33, share_percentage: None },
+            ],
+        };
+        assert!(strategy.validate(&ctx).is_err());
+    }
+
+    #[test]
+    fn test_equal_split_passes_on_exact_division_and_single_share() {
+        let strategy = SplitStrategyFactory::get_strategy(&SplitType::EQUAL);
+        let even_ctx = SplitContext {
+            total_amount: 100,
+            shares: vec![
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 25, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 25, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 25, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 25, share_percentage: None },
+            ],
+        };
+        assert!(strategy.validate(&even_ctx).is_ok());
+
+        let single_ctx = SplitContext {
+            total_amount: 50,
+            shares: vec![SplitShareInput { user_id: Uuid::now_v7(), share_amount: 50, share_percentage: None }],
+        };
+        assert!(strategy.validate(&single_ctx).is_ok());
     }
 
     #[test]
