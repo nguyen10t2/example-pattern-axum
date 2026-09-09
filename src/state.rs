@@ -68,7 +68,7 @@ impl AppState {
     pub async fn from_env() -> Result<Self, AppStateError> {
         let argon2 = Argon2Config::from_env().build_argon2()?;
         let argon2_arc = Arc::new(argon2);
-        let db_config = DatabaseConfig::builder().from_env().build()?;
+        let db_config = DatabaseConfig::from_env()?;
         let pool = db_config.connect_lazy()?;
         tracing::debug!("database pool created (lazy; first connection deferred until first query)");
 

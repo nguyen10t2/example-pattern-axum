@@ -278,14 +278,13 @@ impl DatabaseConfig {
         DatabaseConfigBuilder::new()
     }
 
-    /// Convenience shortcut: reads from env and panics if `DATABASE_URL` is missing.
+    /// Convenience shortcut: reads from env.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the `DATABASE_URL` environment variable is not set.
-    #[must_use]
-    pub fn from_env() -> Self {
-        Self::builder().from_env().build().expect("DATABASE_URL must be set")
+    /// Returns [`ConfigError::MissingDatabaseUrl`] if `DATABASE_URL` is not set.
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::builder().from_env().build()
     }
 
     /// Creates a new database pool with the configured settings.
