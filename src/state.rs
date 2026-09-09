@@ -46,11 +46,14 @@ impl AppState {
         let argon2_arc = Arc::new(argon2);
         let db_config = DatabaseConfig::from_env();
         let pool = db_config.connect_lazy().expect("failed to connect to database");
+        tracing::debug!("database pool created (lazy; first connection deferred until first query)");
 
         let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        tracing::debug!("connecting to redis at {redis_url}");
         let redis_client = redis::Client::open(redis_url.as_str()).expect("invalid redis url");
         let connection_manager =
             redis::aio::ConnectionManager::new(redis_client).await.expect("failed to connect to redis");
+        tracing::debug!("redis connection established");
 
         let cache: Arc<dyn CacheStore> = Arc::new(RedisCache::new(connection_manager.clone()));
         let rate_limiter = RedisRateLimiter::new(connection_manager.clone());

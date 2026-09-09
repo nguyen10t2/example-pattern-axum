@@ -139,6 +139,7 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
     pub min_connections: u32,
     pub acquire_slow_threshold: std::time::Duration,
+    pub acquire_timeout: std::time::Duration,
 }
 
 /// Builder for [`DatabaseConfig`].
@@ -155,12 +156,14 @@ pub struct DatabaseConfig {
 /// | max_connections         | 5       |
 /// | min_connections         | 1       |
 /// | acquire_slow_threshold  | 2 s     |
+/// | acquire_timeout         | 10 s    |
 #[derive(Debug, Clone)]
 pub struct DatabaseConfigBuilder {
     database_url: Option<String>,
     max_connections: u32,
     min_connections: u32,
     acquire_slow_threshold: std::time::Duration,
+    acquire_timeout: std::time::Duration,
 }
 
 impl Default for DatabaseConfigBuilder {
@@ -170,6 +173,7 @@ impl Default for DatabaseConfigBuilder {
             max_connections: 5,
             min_connections: 1,
             acquire_slow_threshold: std::time::Duration::from_secs(2),
+            acquire_timeout: std::time::Duration::from_secs(10),
         }
     }
 }
@@ -209,6 +213,16 @@ impl DatabaseConfigBuilder {
         self
     }
 
+    /// Sets the maximum time [`sqlx::Pool::acquire`] will wait for a connection
+    /// before returning an error. This also bounds how long the pool waits while
+    /// trying to open a new connection to an unreachable database, so the server
+    /// fails fast instead of hanging forever. Default: 10 seconds.
+    #[must_use]
+    pub fn acquire_timeout(mut self, d: std::time::Duration) -> Self {
+        self.acquire_timeout = d;
+        self
+    }
+
     /// Populates fields from environment variables, falling back to the
     /// current builder values.
     ///
@@ -220,6 +234,7 @@ impl DatabaseConfigBuilder {
     /// | `DB_MAX_CONNECTIONS`      | max_connections        |
     /// | `DB_MIN_CONNECTIONS`      | min_connections        |
     /// | `DB_ACQUIRE_SLOW_THRESHOLD` | acquire_slow_threshold (seconds) |
+    /// | `DB_ACQUIRE_TIMEOUT`      | acquire_timeout (seconds) |
     #[must_use]
     pub fn from_env(self) -> Self {
         Self {
@@ -229,6 +244,10 @@ impl DatabaseConfigBuilder {
             acquire_slow_threshold: std::time::Duration::from_secs(parse_env(
                 "DB_ACQUIRE_SLOW_THRESHOLD",
                 self.acquire_slow_threshold.as_secs(),
+            )),
+            acquire_timeout: std::time::Duration::from_secs(parse_env(
+                "DB_ACQUIRE_TIMEOUT",
+                self.acquire_timeout.as_secs(),
             )),
         }
     }
@@ -245,6 +264,7 @@ impl DatabaseConfigBuilder {
             max_connections: self.max_connections,
             min_connections: self.min_connections,
             acquire_slow_threshold: self.acquire_slow_threshold,
+            acquire_timeout: self.acquire_timeout,
         })
     }
 }
@@ -271,12 +291,19 @@ impl DatabaseConfig {
     /// # Errors
     ///
     /// Returns an error if the database connection cannot be established.
+    ///
+    /// Note: the pool is created lazily. `acquire_timeout` bounds how long the
+    /// pool waits while opening a connection, so an unreachable database surfaces
+    /// as an error instead of hanging the process.
     pub fn connect_lazy(&self) -> Result<sqlx::PgPool, sqlx::Error> {
-        sqlx::postgres::PgPoolOptions::new()
+        let options = self.database_url.parse::<sqlx::postgres::PgConnectOptions>()?;
+
+        Ok(sqlx::postgres::PgPoolOptions::new()
             .max_connections(self.max_connections)
             .min_connections(self.min_connections)
             .acquire_slow_threshold(self.acquire_slow_threshold)
-            .connect_lazy(&self.database_url)
+            .acquire_timeout(self.acquire_timeout)
+            .connect_lazy_with(options))
     }
 
     /// Runs database migrations using the configured database pool.
@@ -285,6 +312,10 @@ impl DatabaseConfig {
     ///
     /// Returns an error if migrations fail to run.
     pub async fn migrate(&self, pool: &sqlx::PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+        tracing::debug!(
+            "acquiring a database connection for migrations (acquire_timeout={}s)",
+            self.acquire_timeout.as_secs()
+        );
         tracing::info!("Running database migrations...");
         sqlx::migrate!("./migrations").run(pool).await?;
         tracing::info!("Database migrations completed successfully.");
