@@ -17,6 +17,14 @@ pub trait CacheStore: Send + Sync {
     fn set_raw(&self, key: &str, value: &str, expiration_secs: u64) -> impl Future<Output = ()> + Send;
     /// Xóa key (idempotent).
     fn delete(&self, key: &str) -> impl Future<Output = ()> + Send;
+    /// Xóa nhiều key trong 1 batch (Redis pipeline; backend khác loop).
+    fn delete_many(&self, keys: &[String]) -> impl Future<Output = ()> + Send {
+        async move {
+            for key in keys {
+                self.delete(key).await;
+            }
+        }
+    }
 }
 
 pub trait CacheStoreExt: CacheStore {
@@ -73,6 +81,18 @@ impl CacheStore for RedisCache {
     async fn delete(&self, key: &str) {
         let mut conn = self.manager.clone();
         let _: Result<(), redis::RedisError> = conn.del(key).await;
+    }
+
+    async fn delete_many(&self, keys: &[String]) {
+        if keys.is_empty() {
+            return;
+        }
+        let mut conn = self.manager.clone();
+        let mut pipe = redis::pipe();
+        for key in keys {
+            pipe.cmd("DEL").arg(key);
+        }
+        let _: Result<(), redis::RedisError> = pipe.exec_async(&mut conn).await;
     }
 }
 

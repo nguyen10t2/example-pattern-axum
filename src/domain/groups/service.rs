@@ -10,6 +10,7 @@ use crate::{
         groups::{
             entity::{NewGroupEntity, NewGroupMemberEntity},
             mapper::GroupMapper,
+            membership::{self, invalidate_member_cache},
             repository::GroupRepository,
             request::{AddMemberRequest, CreateGroupRequest},
             response::{
@@ -241,7 +242,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(summary)
     }
 
-    /// Thêm thành viên vào nhóm (chỉ admin), xóa cache summary.
+    /// Thêm thành viên vào nhóm (chỉ admin), xóa cache summary + membership.
     ///
     /// # Errors
     ///
@@ -268,6 +269,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         let full_name = user.map_or_else(|| "Unknown Member".to_string(), |u| u.full_name);
 
         self.cache.delete(&format!("group_summary:{group_id}")).await;
+        invalidate_member_cache(&self.cache, group_id).await;
 
         Ok(GroupMemberResponse {
             group_id: member.group_id,
@@ -306,7 +308,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(members)
     }
 
-    /// Xóa mềm nhóm (chỉ admin), xóa cache summary.
+    /// Xóa mềm nhóm (chỉ admin), xóa cache summary + membership.
     ///
     /// # Errors
     ///
@@ -319,6 +321,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         }
 
         self.cache.delete(&format!("group_summary:{id}")).await;
+        invalidate_member_cache(&self.cache, id).await;
         Ok(())
     }
 
@@ -328,11 +331,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     ///
     /// Trả `NotGroupMember` khi user ngoài nhóm.
     pub async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        if !members.iter().any(|m| m.user_id == user_id) {
-            return Err(AppError::Business(BusinessError::NotGroupMember));
-        }
-        Ok(())
+        membership::ensure_membership(&self.cache, &self.pool, &self.group_repo, group_id, user_id).await
     }
 
     /// Chặn nếu user không phải admin nhóm.
@@ -341,11 +340,6 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     ///
     /// Trả `AdminRequired` khi user ngoài nhóm hoặc không phải admin.
     pub async fn ensure_admin(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        let member = members.iter().find(|m| m.user_id == user_id);
-        match member {
-            Some(m) if m.role == GroupRole::ADMIN => Ok(()),
-            _ => Err(AppError::Business(BusinessError::AdminRequired)),
-        }
+        membership::ensure_admin(&self.cache, &self.pool, &self.group_repo, group_id, user_id).await
     }
 }

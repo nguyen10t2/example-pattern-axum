@@ -6,7 +6,7 @@ use crate::domain::expenses::{
     repository::ExpenseRepository,
 };
 use async_trait::async_trait;
-use sqlx::{Executor, Postgres};
+use sqlx::{Executor, FromRow, Postgres, Row};
 use uuid::Uuid;
 
 #[derive(Clone, Default)]
@@ -102,16 +102,11 @@ impl ExpenseRepository for PostgresExpenseRepository {
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<ExpenseWithPayer>, i64), sqlx::Error> {
-        let count_row: (i64,) =
-            sqlx::query_as("SELECT COUNT(*)::bigint FROM expenses WHERE group_id = $1 AND deleted_at IS NULL")
-                .bind(group_id)
-                .fetch_one(executor)
-                .await?;
-
-        let items = sqlx::query_as::<Postgres, ExpenseWithPayer>(
+        // Single round trip: items + total via window count (evaluated before LIMIT).
+        let rows = sqlx::query(
             "SELECT e.id, e.group_id, e.created_by_id, e.payer_id, u.full_name AS payer_name,
                     e.amount, e.currency, e.description, e.split_type, e.expense_date,
-                    e.deleted_at, e.created_at, e.updated_at
+                    e.deleted_at, e.created_at, e.updated_at, COUNT(*) OVER() AS total_count
              FROM expenses e
              INNER JOIN users u ON e.payer_id = u.id
              WHERE e.group_id = $1 AND e.deleted_at IS NULL
@@ -124,7 +119,10 @@ impl ExpenseRepository for PostgresExpenseRepository {
         .fetch_all(executor)
         .await?;
 
-        Ok((items, count_row.0))
+        let total = rows.first().map(|row| row.try_get::<i64, _>("total_count")).transpose()?.unwrap_or(0);
+        let items = rows.iter().map(ExpenseWithPayer::from_row).collect::<Result<Vec<_>, _>>()?;
+
+        Ok((items, total))
     }
 
     async fn find_by_group_with_shares<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
