@@ -51,13 +51,13 @@ impl IntoResponse for AppError {
                     | BusinessError::NotFound(msg)
                     | BusinessError::Conflict(msg)
                     | BusinessError::ValidationError(msg) => msg.clone(),
-                    _ => crate::utils::i18n::t(code, "vi", None),
+                    _ => crate::utils::i18n::t(code, "vi", None::<&std::collections::HashMap<&str, &str>>),
                 };
                 (err.status_code(), msg, None)
             }
             Self::System(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                crate::utils::i18n::t("INTERNAL_SERVER_ERROR", "vi", None),
+                crate::utils::i18n::t("INTERNAL_SERVER_ERROR", "vi", None::<&std::collections::HashMap<&str, &str>>),
                 Some(self),
             ),
         };

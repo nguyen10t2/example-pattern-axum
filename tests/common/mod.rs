@@ -109,7 +109,7 @@ impl UserRepository for MockUserRepository {
         let mut users = self.users.lock().await;
         let user = users.iter_mut().find(|u| u.id == id).unwrap();
         if let Some(ref name) = data.full_name {
-            user.full_name = name.clone();
+            user.full_name.clone_from(name);
         }
         if let Some(ref hash) = data.password_hash {
             user.password_hash = Some(hash.clone());
@@ -121,7 +121,7 @@ impl UserRepository for MockUserRepository {
             user.avatar_url = Some(avatar.clone());
         }
         if let Some(ref phone) = data.phone {
-            user.phone = phone.clone();
+            user.phone.clone_from(phone);
         }
         if let Some(currency) = data.preferred_currency {
             user.preferred_currency = currency;
@@ -317,7 +317,7 @@ impl ExpenseRepository for MockExpenseRepository {
             results.push(entity);
         }
         if let Some(last) = self.expenses.lock().await.last_mut() {
-            last.shares = results.clone();
+            last.shares.clone_from(&results);
         }
         Ok(results)
     }
@@ -397,9 +397,8 @@ impl ExpenseRepository for MockExpenseRepository {
         expense_id: Uuid,
     ) -> Result<Vec<ExpenseShareWithUser>, sqlx::Error> {
         let expenses = self.expenses.lock().await;
-        if let Some(exp) = expenses.iter().find(|e| e.expense.id == expense_id) {
-            Ok(exp
-                .shares
+        Ok(expenses.iter().find(|e| e.expense.id == expense_id).map_or_else(Vec::new, |exp| {
+            exp.shares
                 .iter()
                 .map(|s| ExpenseShareWithUser {
                     id: s.id,
@@ -411,10 +410,8 @@ impl ExpenseRepository for MockExpenseRepository {
                     created_at: s.created_at,
                     updated_at: s.updated_at,
                 })
-                .collect())
-        } else {
-            Ok(vec![])
-        }
+                .collect()
+        }))
     }
 
     async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(

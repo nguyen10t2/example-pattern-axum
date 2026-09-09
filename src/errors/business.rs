@@ -85,32 +85,28 @@ pub enum BusinessError {
 impl BusinessError {
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::Forbidden => StatusCode::FORBIDDEN,
-            Self::InvalidCredentials => StatusCode::UNAUTHORIZED,
-            Self::UserAlreadyExists => StatusCode::BAD_REQUEST,
-            Self::UserNotFound(_) => StatusCode::NOT_FOUND,
-            Self::InvalidOtp => StatusCode::BAD_REQUEST,
-            Self::InvalidSession => StatusCode::UNAUTHORIZED,
-            Self::EmailNotVerified => StatusCode::FORBIDDEN,
-            Self::InvalidOldPassword => StatusCode::BAD_REQUEST,
-            Self::GroupNotFound => StatusCode::NOT_FOUND,
-            Self::NotGroupMember => StatusCode::FORBIDDEN,
-            Self::AdminRequired => StatusCode::FORBIDDEN,
-            Self::InvalidInviteCode => StatusCode::NOT_FOUND,
-            Self::PayerNotInGroup => StatusCode::BAD_REQUEST,
-            Self::UserNotInGroup(_) => StatusCode::BAD_REQUEST,
-            Self::UserAlreadyInGroup => StatusCode::CONFLICT,
-            Self::ExpenseNotFound => StatusCode::NOT_FOUND,
-            Self::SettlementNotFound => StatusCode::NOT_FOUND,
-            Self::DeletePermissionDenied => StatusCode::FORBIDDEN,
-            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
-            Self::NotFound(_) => StatusCode::NOT_FOUND,
-            Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Unauthorized | Self::InvalidCredentials | Self::InvalidSession => StatusCode::UNAUTHORIZED,
+            Self::Forbidden
+            | Self::EmailNotVerified
+            | Self::NotGroupMember
+            | Self::AdminRequired
+            | Self::DeletePermissionDenied => StatusCode::FORBIDDEN,
+            Self::UserAlreadyExists
+            | Self::InvalidOtp
+            | Self::InvalidOldPassword
+            | Self::PayerNotInGroup
+            | Self::UserNotInGroup(_)
+            | Self::BadRequest(_)
+            | Self::InvalidUserId(_) => StatusCode::BAD_REQUEST,
+            Self::UserNotFound(_)
+            | Self::GroupNotFound
+            | Self::InvalidInviteCode
+            | Self::ExpenseNotFound
+            | Self::SettlementNotFound
+            | Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::UserAlreadyInGroup | Self::Conflict(_) | Self::DuplicateField { .. } => StatusCode::CONFLICT,
             Self::ValidationError(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
-            Self::DuplicateField { .. } => StatusCode::CONFLICT,
-            Self::InvalidUserId(_) => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -135,13 +131,11 @@ impl BusinessError {
             Self::ExpenseNotFound => error_codes::EXPENSE_NOT_FOUND,
             Self::SettlementNotFound => error_codes::SETTLEMENT_NOT_FOUND,
             Self::DeletePermissionDenied => error_codes::DELETE_PERMISSION_DENIED,
-            Self::BadRequest(_) => error_codes::BAD_REQUEST,
+            Self::BadRequest(_) | Self::InvalidUserId(_) => error_codes::BAD_REQUEST,
             Self::NotFound(_) => error_codes::NOT_FOUND,
-            Self::Conflict(_) => error_codes::CONFLICT,
+            Self::Conflict(_) | Self::DuplicateField { .. } => error_codes::CONFLICT,
             Self::ValidationError(_) => error_codes::VALIDATION_ERROR,
             Self::TooManyRequests => error_codes::TOO_MANY_REQUESTS,
-            Self::DuplicateField { .. } => error_codes::CONFLICT,
-            Self::InvalidUserId(_) => error_codes::BAD_REQUEST,
         }
     }
 }

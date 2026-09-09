@@ -104,7 +104,7 @@ impl UserRepository for PostgresUserRepository {
         .bind(&data.google_id)
         .bind(&data.avatar_url)
         .bind(data.phone.is_some())
-        .bind(data.phone.as_ref().and_then(|p| p.clone()))
+        .bind(data.phone.as_ref().cloned())
         .bind(data.preferred_currency)
         .bind(data.is_active)
         .bind(id)

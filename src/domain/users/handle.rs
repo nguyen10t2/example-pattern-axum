@@ -135,7 +135,7 @@ pub async fn handle_refresh(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<(CookieJar, SuccessResponse<AuthResponse>), AppError> {
-    let refresh_token = jar.get("refreshCookie").map(|c| c.value());
+    let refresh_token = jar.get("refreshCookie").map(Cookie::value);
     let tokens = state.user_service.refresh(refresh_token).await?;
 
     let mut refresh_cookie = Cookie::new("refreshCookie", tokens.refresh_token);
@@ -159,7 +159,7 @@ pub async fn handle_signout(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<(CookieJar, SuccessResponse<()>), AppError> {
-    let refresh_token = jar.get("refreshCookie").map(|c| c.value());
+    let refresh_token = jar.get("refreshCookie").map(Cookie::value);
     state.user_service.sign_out(refresh_token).await?;
 
     let mut remove_cookie = Cookie::new("refreshCookie", "");
