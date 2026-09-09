@@ -1,4 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
+use hashbrown::HashMap;
+use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -10,6 +11,7 @@ use crate::{
         groups::{
             entity::{NewGroupEntity, NewGroupMemberEntity},
             mapper::GroupMapper,
+            membership::{self, invalidate_member_cache},
             repository::GroupRepository,
             request::{AddMemberRequest, CreateGroupRequest},
             response::{
@@ -81,7 +83,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         tx.commit().await?;
 
         info!(group_id = %group.id, name = %group.name, creator_id = %creator_id, "Group created");
-        Ok(GroupMapper::to_response(&group))
+        Ok(GroupMapper::to_response(group))
     }
 
     /// Cho user vào nhóm bằng invite code (đã vào rồi thì bỏ qua, vẫn `Ok`).
@@ -115,7 +117,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             }
         }
 
-        Ok(GroupMapper::to_response(&group))
+        Ok(GroupMapper::to_response(group))
     }
 
     /// Liệt kê các nhóm mà user tham gia.
@@ -125,7 +127,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     /// Trả lỗi DB khi đọc thất bại.
     pub async fn find_all_by_user(&self, user_id: Uuid) -> Result<Vec<GroupResponse>, AppError> {
         let groups = self.group_repo.find_all_by_user(&self.pool, user_id).await?;
-        Ok(groups.iter().map(GroupMapper::to_response_with_balance).collect())
+        Ok(groups.into_iter().map(GroupMapper::to_response_with_balance).collect())
     }
 
     /// Lấy nhóm theo id; nếu có `current_user_id` thì check membership song song.
@@ -144,7 +146,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         };
         let group = group_opt.ok_or(AppError::Business(BusinessError::GroupNotFound))?;
 
-        Ok(GroupMapper::to_response(&group))
+        Ok(GroupMapper::to_response(group))
     }
 
     /// Tổng hợp nhóm: số dư từng thành viên + gợi ý trả nợ, cache 1 phút.
@@ -154,6 +156,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     /// # Errors
     ///
     /// Trả `NotGroupMember` khi user ngoài nhóm, `GroupNotFound` khi nhóm không tồn tại.
+    #[tracing::instrument(skip(self), fields(group_id = %group_id))]
     pub async fn get_group_summary(
         &self,
         group_id: Uuid,
@@ -240,7 +243,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(summary)
     }
 
-    /// Thêm thành viên vào nhóm (chỉ admin), xóa cache summary.
+    /// Thêm thành viên vào nhóm (chỉ admin), xóa cache summary + membership.
     ///
     /// # Errors
     ///
@@ -267,6 +270,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         let full_name = user.map_or_else(|| "Unknown Member".to_string(), |u| u.full_name);
 
         self.cache.delete(&format!("group_summary:{group_id}")).await;
+        invalidate_member_cache(&self.cache, group_id).await;
 
         Ok(GroupMemberResponse {
             group_id: member.group_id,
@@ -289,7 +293,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     ) -> Result<Vec<GroupMemberResponse>, AppError> {
         self.ensure_membership(group_id, current_user_id).await?;
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        Ok(members.iter().map(GroupMapper::to_member_response).collect())
+        Ok(members.into_iter().map(GroupMapper::to_member_response).collect())
     }
 
     /// Lấy danh sách thành viên kèm user (dùng nội bộ service).
@@ -305,7 +309,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(members)
     }
 
-    /// Xóa mềm nhóm (chỉ admin), xóa cache summary.
+    /// Xóa mềm nhóm (chỉ admin), xóa cache summary + membership.
     ///
     /// # Errors
     ///
@@ -318,6 +322,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         }
 
         self.cache.delete(&format!("group_summary:{id}")).await;
+        invalidate_member_cache(&self.cache, id).await;
         Ok(())
     }
 
@@ -327,11 +332,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     ///
     /// Trả `NotGroupMember` khi user ngoài nhóm.
     pub async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        if !members.iter().any(|m| m.user_id == user_id) {
-            return Err(AppError::Business(BusinessError::NotGroupMember));
-        }
-        Ok(())
+        membership::ensure_membership(&self.cache, &self.pool, &self.group_repo, group_id, user_id).await
     }
 
     /// Chặn nếu user không phải admin nhóm.
@@ -340,11 +341,6 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     ///
     /// Trả `AdminRequired` khi user ngoài nhóm hoặc không phải admin.
     pub async fn ensure_admin(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        let member = members.iter().find(|m| m.user_id == user_id);
-        match member {
-            Some(m) if m.role == GroupRole::ADMIN => Ok(()),
-            _ => Err(AppError::Business(BusinessError::AdminRequired)),
-        }
+        membership::ensure_admin(&self.cache, &self.pool, &self.group_repo, group_id, user_id).await
     }
 }

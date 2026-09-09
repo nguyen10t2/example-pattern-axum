@@ -1,6 +1,7 @@
 pub mod entity;
 pub mod handle;
 pub mod mapper;
+pub mod membership;
 pub mod pg;
 pub mod repository;
 pub mod request;

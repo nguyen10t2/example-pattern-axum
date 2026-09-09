@@ -3,7 +3,7 @@ use crate::domain::settlements::{
     repository::SettlementRepository,
 };
 use async_trait::async_trait;
-use sqlx::{Executor, Postgres};
+use sqlx::{Executor, FromRow, Postgres, Row};
 use uuid::Uuid;
 
 #[derive(Clone, Default)]
@@ -47,10 +47,14 @@ impl SettlementRepository for PostgresSettlementRepository {
         executor: E,
         id: Uuid,
     ) -> Result<Option<SettlementEntity>, sqlx::Error> {
-        sqlx::query_as::<Postgres, SettlementEntity>("SELECT * FROM settlements WHERE id = $1 AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(executor)
-            .await
+        sqlx::query_as::<Postgres, SettlementEntity>(
+            "SELECT id, group_id, sender_id, receiver_id, amount, currency, settled_at,
+                    deleted_at, created_at, updated_at
+             FROM settlements WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(executor)
+        .await
     }
 
     async fn find_by_group<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
@@ -59,7 +63,9 @@ impl SettlementRepository for PostgresSettlementRepository {
         group_id: Uuid,
     ) -> Result<Vec<SettlementEntity>, sqlx::Error> {
         sqlx::query_as::<Postgres, SettlementEntity>(
-            "SELECT * FROM settlements WHERE group_id = $1 AND deleted_at IS NULL",
+            "SELECT id, group_id, sender_id, receiver_id, amount, currency, settled_at,
+                    deleted_at, created_at, updated_at
+             FROM settlements WHERE group_id = $1 AND deleted_at IS NULL",
         )
         .bind(group_id)
         .fetch_all(executor)
@@ -73,16 +79,12 @@ impl SettlementRepository for PostgresSettlementRepository {
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<SettlementWithUsers>, i64), sqlx::Error> {
-        let count_row: (i64,) =
-            sqlx::query_as("SELECT COUNT(*)::bigint FROM settlements WHERE group_id = $1 AND deleted_at IS NULL")
-                .bind(group_id)
-                .fetch_one(executor)
-                .await?;
-
-        let items = sqlx::query_as::<Postgres, SettlementWithUsers>(
+        // Single round trip: items + total via window count (evaluated before LIMIT).
+        let rows = sqlx::query(
             "SELECT s.id, s.group_id, s.sender_id, u_sender.full_name AS sender_name,
                     s.receiver_id, u_receiver.full_name AS receiver_name,
-                    s.amount, s.currency, s.settled_at, s.deleted_at, s.created_at, s.updated_at
+                    s.amount, s.currency, s.settled_at, s.deleted_at, s.created_at, s.updated_at,
+                    COUNT(*) OVER() AS total_count
              FROM settlements s
              INNER JOIN users u_sender ON s.sender_id = u_sender.id
              INNER JOIN users u_receiver ON s.receiver_id = u_receiver.id
@@ -96,7 +98,10 @@ impl SettlementRepository for PostgresSettlementRepository {
         .fetch_all(executor)
         .await?;
 
-        Ok((items, count_row.0))
+        let total = rows.first().map(|row| row.try_get::<i64, _>("total_count")).transpose()?.unwrap_or(0);
+        let items = rows.iter().map(SettlementWithUsers::from_row).collect::<Result<Vec<_>, _>>()?;
+
+        Ok((items, total))
     }
 
     async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(

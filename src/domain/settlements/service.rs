@@ -6,7 +6,10 @@ use uuid::Uuid;
 use crate::{
     domain::{
         GroupRole,
-        groups::repository::GroupRepository,
+        groups::{
+            membership::{self, member_entries},
+            repository::GroupRepository,
+        },
         settlements::{
             entity::NewSettlementEntity, mapper::SettlementMapper, repository::SettlementRepository,
             request::CreateSettlementRequest, response::SettlementResponse,
@@ -41,7 +44,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         data: CreateSettlementRequest,
         current_user_id: Uuid,
     ) -> Result<SettlementResponse, AppError> {
-        let members = self.group_repo.find_members(&self.pool, data.group_id).await?;
+        let members = member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id).await?;
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
         if !member_ids.contains(&current_user_id) {
@@ -111,7 +114,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
                 .map_err(AppError::from)
         },)?;
 
-        let response_items = SettlementMapper::to_response_list_with_users(&items);
+        let response_items = SettlementMapper::to_response_list_with_users(items);
 
         Ok(PaginatedResponse::new(response_items, total, pagination.page(), limit))
     }
@@ -126,7 +129,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         let settlement = self.settlement_repo.find_by_id(&self.pool, id).await?;
         let settlement = settlement.ok_or(AppError::Business(BusinessError::SettlementNotFound))?;
 
-        let members = self.group_repo.find_members(&self.pool, settlement.group_id).await?;
+        let members = member_entries(&self.cache, &self.pool, &self.group_repo, settlement.group_id).await?;
         let member = members.iter().find(|m| m.user_id == current_user_id);
 
         let Some(member) = member else {
@@ -153,10 +156,6 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
     ///
     /// Trả `NotGroupMember` khi user ngoài nhóm.
     async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        if !members.iter().any(|m| m.user_id == user_id) {
-            return Err(AppError::Business(BusinessError::NotGroupMember));
-        }
-        Ok(())
+        membership::ensure_membership(&self.cache, &self.pool, &self.group_repo, group_id, user_id).await
     }
 }

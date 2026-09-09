@@ -1,5 +1,5 @@
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Số dư ròng của một thành viên: dương = được nhận, âm = đang nợ.
@@ -147,6 +147,7 @@ impl DebtEngine {
     ///
     /// Để sync vì thuần tính toán trên memory, không I/O — caller async cứ gọi trực tiếp,
     /// không cần `spawn_blocking` với input cỡ nhóm chat.
+    #[tracing::instrument(skip(balances), fields(n = balances.len()))]
     #[must_use]
     pub fn simplify_debts(balances: &[UserBalance]) -> Vec<SettlementSuggestion> {
         Self::simplify_debts_blocking(balances)
@@ -155,6 +156,7 @@ impl DebtEngine {
     /// Tính số dư ròng từng thành viên từ expenses và settlements đã chốt.
     ///
     /// Để sync vì lý do như [`DebtEngine::simplify_debts`].
+    #[tracing::instrument(skip(user_ids, expenses, settlements), fields(n = user_ids.len()))]
     #[must_use]
     pub fn calculate_net_balances(
         user_ids: &[Uuid],

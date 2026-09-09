@@ -46,10 +46,13 @@ impl GroupRepository for PostgresGroupRepository {
         executor: E,
         id: Uuid,
     ) -> Result<Option<GroupEntity>, sqlx::Error> {
-        sqlx::query_as::<Postgres, GroupEntity>("SELECT * FROM groups WHERE id = $1 AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(executor)
-            .await
+        sqlx::query_as::<Postgres, GroupEntity>(
+            "SELECT id, name, description, invite_code, default_currency, deleted_at, created_at, updated_at
+             FROM groups WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(executor)
+        .await
     }
 
     async fn add_member<'e, E: Executor<'e, Database = Postgres> + Send>(
@@ -90,10 +93,13 @@ impl GroupRepository for PostgresGroupRepository {
         executor: E,
         code: &str,
     ) -> Result<Option<GroupEntity>, sqlx::Error> {
-        sqlx::query_as::<Postgres, GroupEntity>("SELECT * FROM groups WHERE invite_code = $1 AND deleted_at IS NULL")
-            .bind(code)
-            .fetch_optional(executor)
-            .await
+        sqlx::query_as::<Postgres, GroupEntity>(
+            "SELECT id, name, description, invite_code, default_currency, deleted_at, created_at, updated_at
+             FROM groups WHERE invite_code = $1 AND deleted_at IS NULL",
+        )
+        .bind(code)
+        .fetch_optional(executor)
+        .await
     }
 
     async fn find_all_by_user<'e, E: Executor<'e, Database = Postgres> + Send>(

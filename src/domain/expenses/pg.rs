@@ -6,7 +6,8 @@ use crate::domain::expenses::{
     repository::ExpenseRepository,
 };
 use async_trait::async_trait;
-use sqlx::{Executor, Postgres};
+use sqlx::{Executor, FromRow, Postgres, Row};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Clone, Default)]
@@ -18,6 +19,28 @@ impl PostgresExpenseRepository {
     pub const fn new() -> Self {
         Self
     }
+}
+
+/// Gom shares theo expense trong O(E+S): 1 pass `HashMap` rồi ráp.
+///
+/// Thay vòng `filter` O(E×S) cho từng expense — cải thiện đo được ở bench
+/// `share_grouping` (E càng lớn càng rõ).
+#[must_use]
+pub fn assemble_expenses_with_shares(
+    expenses: Vec<ExpenseEntity>,
+    shares: Vec<ExpenseShareEntity>,
+) -> Vec<ExpenseWithSharesEntity> {
+    let mut by_expense: HashMap<Uuid, Vec<ExpenseShareEntity>> = HashMap::with_capacity(expenses.len());
+    for share in shares {
+        by_expense.entry(share.expense_id).or_default().push(share);
+    }
+    expenses
+        .into_iter()
+        .map(|expense| {
+            let shares = by_expense.remove(&expense.id).unwrap_or_default();
+            ExpenseWithSharesEntity { expense, shares }
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -102,16 +125,11 @@ impl ExpenseRepository for PostgresExpenseRepository {
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<ExpenseWithPayer>, i64), sqlx::Error> {
-        let count_row: (i64,) =
-            sqlx::query_as("SELECT COUNT(*)::bigint FROM expenses WHERE group_id = $1 AND deleted_at IS NULL")
-                .bind(group_id)
-                .fetch_one(executor)
-                .await?;
-
-        let items = sqlx::query_as::<Postgres, ExpenseWithPayer>(
+        // Single round trip: items + total via window count (evaluated before LIMIT).
+        let rows = sqlx::query(
             "SELECT e.id, e.group_id, e.created_by_id, e.payer_id, u.full_name AS payer_name,
                     e.amount, e.currency, e.description, e.split_type, e.expense_date,
-                    e.deleted_at, e.created_at, e.updated_at
+                    e.deleted_at, e.created_at, e.updated_at, COUNT(*) OVER() AS total_count
              FROM expenses e
              INNER JOIN users u ON e.payer_id = u.id
              WHERE e.group_id = $1 AND e.deleted_at IS NULL
@@ -124,7 +142,10 @@ impl ExpenseRepository for PostgresExpenseRepository {
         .fetch_all(executor)
         .await?;
 
-        Ok((items, count_row.0))
+        let total = rows.first().map(|row| row.try_get::<i64, _>("total_count")).transpose()?.unwrap_or(0);
+        let items = rows.iter().map(ExpenseWithPayer::from_row).collect::<Result<Vec<_>, _>>()?;
+
+        Ok((items, total))
     }
 
     async fn find_by_group_with_shares<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
@@ -133,7 +154,9 @@ impl ExpenseRepository for PostgresExpenseRepository {
         group_id: Uuid,
     ) -> Result<Vec<ExpenseWithSharesEntity>, sqlx::Error> {
         let expenses = sqlx::query_as::<Postgres, ExpenseEntity>(
-            "SELECT * FROM expenses
+            "SELECT id, group_id, created_by_id, payer_id, amount, currency, description, split_type,
+                    expense_date, deleted_at, created_at, updated_at
+             FROM expenses
              WHERE group_id = $1 AND deleted_at IS NULL
              ORDER BY expense_date DESC",
         )
@@ -147,18 +170,15 @@ impl ExpenseRepository for PostgresExpenseRepository {
 
         let expense_ids: Vec<Uuid> = expenses.iter().map(|e| e.id).collect();
         let all_shares = sqlx::query_as::<Postgres, ExpenseShareEntity>(
-            "SELECT * FROM expense_shares
+            "SELECT id, expense_id, user_id, share_amount, share_percentage, created_at, updated_at
+             FROM expense_shares
              WHERE expense_id = ANY($1)",
         )
         .bind(&expense_ids)
         .fetch_all(executor)
         .await?;
 
-        let mut results = Vec::with_capacity(expenses.len());
-        for expense in expenses {
-            let shares = all_shares.iter().filter(|s| s.expense_id == expense.id).cloned().collect();
-            results.push(ExpenseWithSharesEntity { expense, shares });
-        }
+        let results = assemble_expenses_with_shares(expenses, all_shares);
 
         Ok(results)
     }
@@ -194,5 +214,67 @@ impl ExpenseRepository for PostgresExpenseRepository {
         .bind(id)
         .fetch_optional(executor)
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Currency, SplitType};
+    use chrono::Utc;
+
+    fn test_expense(id: Uuid) -> ExpenseEntity {
+        ExpenseEntity {
+            id,
+            group_id: Uuid::now_v7(),
+            created_by_id: Uuid::now_v7(),
+            payer_id: Uuid::now_v7(),
+            amount: 300,
+            currency: Currency::VND,
+            description: String::new(),
+            split_type: SplitType::EQUAL,
+            expense_date: Utc::now(),
+            deleted_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn test_share(expense_id: Uuid, amount: i64) -> ExpenseShareEntity {
+        ExpenseShareEntity {
+            id: Uuid::now_v7(),
+            expense_id,
+            user_id: Uuid::now_v7(),
+            share_amount: amount,
+            share_percentage: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_assemble_expenses_with_shares_groups_correctly() {
+        let e1 = Uuid::now_v7();
+        let e2 = Uuid::now_v7();
+        let expenses = vec![test_expense(e1), test_expense(e2)];
+        let shares = vec![test_share(e1, 100), test_share(e2, 300), test_share(e1, 200)];
+
+        let grouped = assemble_expenses_with_shares(expenses, shares);
+
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].expense.id, e1);
+        assert_eq!(grouped[0].shares.len(), 2);
+        assert_eq!(grouped[1].expense.id, e2);
+        assert_eq!(grouped[1].shares.len(), 1);
+    }
+
+    #[test]
+    fn test_assemble_expenses_with_shares_empty_inputs() {
+        let grouped = assemble_expenses_with_shares(vec![], vec![]);
+        assert!(grouped.is_empty());
+
+        let grouped = assemble_expenses_with_shares(vec![test_expense(Uuid::now_v7())], vec![]);
+        assert_eq!(grouped.len(), 1);
+        assert!(grouped[0].shares.is_empty());
     }
 }
