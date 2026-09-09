@@ -58,6 +58,10 @@ Acceptance: `cargo clippy --all-targets -- -W clippy::pedantic -W clippy::nurser
 
 Branch: `phase3-docs` (from `master`).
 
+Docs style (quy tắc chốt): **tiếng Việt, ngắn gọn 1–2 dòng, đủ hiểu** — không verbose.
+Chỉ docs ở pub fn chuẩn (public API: handlers, services, repos, config, utils dùng chung);
+không docs tràn lan mọi hàm nội bộ. Mỗi docs nói: hàm làm gì + `# Errors` khi trả `Result`.
+
 - [ ] Add `///` doc comments to the 123 public functions missing them
       (handlers, mappers, service methods, `pg::new()` constructors).
       Work module by module: `domain/users`, `domain/groups`, `domain/expenses`,
