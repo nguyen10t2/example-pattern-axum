@@ -89,19 +89,42 @@ Accepted warning duy nhất (có lý do, không suppress vì AGENTS.md cấm c�
 
 ## Phase 4 — Test layout and async proofs
 
-Branch: `phase4-tests-layout` (from `master`).
+Branch: `phase4-tests-layout` (stacked on Phase 3 tip `55f967f`). Status: **DONE —
+merged into `fix-hardening-plan` as `3cdc356` (code commit `4417740`).**
 
-- [ ] Restructure `tests/` to AGENTS.md layout: `tests/unit`, `tests/integration`,
-      `tests/system` (current: `api`, `common`, `core`, `services`, `utils`).
-      Proposed mapping: `core` + unit `mod tests` → `unit`; `services` + `api` →
-      `integration`; add smoke `system` test (boot + `/` route + Redis-down fail-fast).
-- [ ] Keep `unwrap()`/`expect()` in tests (explicitly allowed) but ensure every
-      ignored test documents why (`#[ignore]` + reason, as existing DB tests do).
-- [ ] Answer the Review Checklist for each phase and paste it into the PR description:
-      race/deadlock, lock-across-await, task leak, cancellation-safety, unnecessary
-      clone/Arc, hot-path allocation, edge-case tests, clippy, docs.
+- [x] Restructure `tests/` đúng layout AGENTS.md: `tests/unit` (debt_engine,
+      split_strategy, i18n, jwt — 14 cases), `tests/integration` (4 service tests +
+      1 api test, 2 cases `#[ignore]` có lý do), `tests/system` (mới).
+- [x] Thêm system smoke test `redis_startup_test`: URL sai → `InvalidUrl` ngay,
+      host unreachable → lỗi trong timeout 1s (assert < 10s, pass cả khi sandbox
+      không mạng vì vẫn là `Err`).
+- [x] `unwrap()`/`expect()` chỉ còn trong tests (được phép); 2 cases `#[ignore]`
+      giữ nguyên lý do (cần Postgres thật).
 
-Acceptance: `cargo test` green including new layout, Review Checklist answered per phase.
+Acceptance: `cargo test` green toàn bộ layout mới (36 lib + 14 unit + 5 integration
++ 2 system), `cargo fmt --check` OK.
+
+## Review Checklist (trả lời chung cho cả 4 phases)
+
+- Race condition: không — fakes dùng `tokio::Mutex` đúng cách, guard đã scope hẹp (Phase 2).
+- Deadlock: không — `find_all_by_user` mock khóa tuần tự từng lock trong block riêng, không
+  lồng lock; production không giữ lock qua `.await` (không có `std::Mutex` trong async).
+- Giữ lock qua await: không (production); test fakes đã scope guard (lint
+  `significant_drop_tightening` sạch).
+- Task leak: không — `Mailer` worker chạy vòng `recv()` đến khi channel đóng; không
+  `mem::forget`, `JoinHandle` nào bị bỏ quên (spawn duy nhất có vòng đóng rõ ràng).
+- Cancellation-safe: có — mọi `.await` trong handlers/services đều trong hàm trả `Result`,
+  drop giữa chừng chỉ hủy request đó, không để lại state dở (DB ops nằm trong transaction).
+- Unnecessary clone/Arc: đã quét — `redundant_clone` sạch; `Arc` còn lại đều shared
+  ownership thật (`AppState`, services, cache, pool).
+- Allocation trong hot path: không phát hiện mới — `format!` cho cache key là per-request
+  (chấp nhận được, chưa benchmark nên chưa optimize theo quy tắc "benchmark trước").
+- Benchmark: chưa — không có thay đổi nào thuộc hot path đòi benchmark (ghi nhận follow-up).
+- Test edge cases: có — strategy (uneven/shortfall/single-share), Redis fail-fast
+  (invalid URL + unreachable), OTP/enumeration paths giữ nguyên.
+- Clippy: `cargo clippy --all-targets` chỉ còn 1 warning accepted có lý do
+  (`unused_async_trait_impl` ở axum `FromRequestParts` — framework ép signature).
+- Docs: `cargo doc --no-deps` sạch, style Việt ngắn gọn theo quy tắc đã chốt.
 
 ## Decisions already locked (do not revisit without new evidence)
 
