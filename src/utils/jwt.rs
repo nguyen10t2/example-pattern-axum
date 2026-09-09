@@ -55,12 +55,13 @@ impl Default for JwtConfig {
 }
 
 impl JwtConfig {
+    #[must_use]
     pub fn from_env() -> Self {
         Self::default()
     }
 
     pub fn gen_access_token(&self, user_id: Uuid) -> Result<String, AppError> {
-        let now = Utc::now().timestamp() as usize;
+        let now = usize::try_from(Utc::now().timestamp()).unwrap_or_default();
         let claims = AccessClaims {
             sub: user_id.to_string(),
             token_type: "access".to_string(),
@@ -75,7 +76,7 @@ impl JwtConfig {
     }
 
     pub fn gen_refresh_token(&self, user_id: Uuid, jti: &str) -> Result<String, AppError> {
-        let now = Utc::now().timestamp() as usize;
+        let now = usize::try_from(Utc::now().timestamp()).unwrap_or_default();
         let claims = RefreshClaims {
             sub: user_id.to_string(),
             jti: jti.to_string(),

@@ -10,7 +10,8 @@ use uuid::Uuid;
 pub struct PostgresUserRepository;
 
 impl PostgresUserRepository {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }
@@ -104,7 +105,7 @@ impl UserRepository for PostgresUserRepository {
         .bind(&data.google_id)
         .bind(&data.avatar_url)
         .bind(data.phone.is_some())
-        .bind(data.phone.as_ref().cloned())
+        .bind(data.phone.clone())
         .bind(data.preferred_currency)
         .bind(data.is_active)
         .bind(id)

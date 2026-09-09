@@ -3,6 +3,7 @@ use crate::domain::users::{entity::UserEntity, response::UserResponse};
 pub struct UserMapper;
 
 impl UserMapper {
+    #[must_use]
     pub fn to_response(entity: &UserEntity) -> UserResponse {
         UserResponse {
             id: entity.id,

@@ -47,28 +47,28 @@ impl Argon2ConfigBuilder {
 
     /// Sets the memory cost (in KiB). Default: `Params::DEFAULT_M_COST` (19456 KiB ≈ 19 MiB).
     #[must_use]
-    pub fn memory_cost(mut self, cost: u32) -> Self {
+    pub const fn memory_cost(mut self, cost: u32) -> Self {
         self.memory_cost = cost;
         self
     }
 
     /// Sets the time cost (number of iterations). Default: `Params::DEFAULT_T_COST` (2).
     #[must_use]
-    pub fn time_cost(mut self, cost: u32) -> Self {
+    pub const fn time_cost(mut self, cost: u32) -> Self {
         self.time_cost = cost;
         self
     }
 
     /// Sets the parallelism (number of threads). Default: `Params::DEFAULT_P_COST` (1).
     #[must_use]
-    pub fn parallelism(mut self, p: u32) -> Self {
+    pub const fn parallelism(mut self, p: u32) -> Self {
         self.parallelism = p;
         self
     }
 
     /// Sets the output length in bytes. Default: 32.
     #[must_use]
-    pub fn output_len(mut self, len: usize) -> Self {
+    pub const fn output_len(mut self, len: usize) -> Self {
         self.output_len = len;
         self
     }
@@ -96,7 +96,7 @@ impl Argon2ConfigBuilder {
 
     /// Consumes the builder and returns an [`Argon2Config`].
     #[must_use]
-    pub fn build(self) -> Argon2Config {
+    pub const fn build(self) -> Argon2Config {
         Argon2Config {
             memory_cost: self.memory_cost,
             time_cost: self.time_cost,
@@ -196,21 +196,21 @@ impl DatabaseConfigBuilder {
 
     /// Sets the maximum number of connections in the pool. Default: 5.
     #[must_use]
-    pub fn max_connections(mut self, n: u32) -> Self {
+    pub const fn max_connections(mut self, n: u32) -> Self {
         self.max_connections = n;
         self
     }
 
     /// Sets the minimum number of idle connections. Default: 1.
     #[must_use]
-    pub fn min_connections(mut self, n: u32) -> Self {
+    pub const fn min_connections(mut self, n: u32) -> Self {
         self.min_connections = n;
         self
     }
 
     /// Sets the slow-acquire warning threshold. Default: 2 seconds.
     #[must_use]
-    pub fn acquire_slow_threshold(mut self, d: std::time::Duration) -> Self {
+    pub const fn acquire_slow_threshold(mut self, d: std::time::Duration) -> Self {
         self.acquire_slow_threshold = d;
         self
     }
@@ -220,7 +220,7 @@ impl DatabaseConfigBuilder {
     /// trying to open a new connection to an unreachable database, so the server
     /// fails fast instead of hanging forever. Default: 10 seconds.
     #[must_use]
-    pub fn acquire_timeout(mut self, d: std::time::Duration) -> Self {
+    pub const fn acquire_timeout(mut self, d: std::time::Duration) -> Self {
         self.acquire_timeout = d;
         self
     }
@@ -380,7 +380,7 @@ impl RedisConfigBuilder {
     /// This is also used as the overall bound for the initial connect so the
     /// server fails fast instead of hanging forever. Default: 5 seconds.
     #[must_use]
-    pub fn connection_timeout(mut self, d: std::time::Duration) -> Self {
+    pub const fn connection_timeout(mut self, d: std::time::Duration) -> Self {
         self.connection_timeout = d;
         self
     }
@@ -389,7 +389,7 @@ impl RedisConfigBuilder {
     /// `ConnectionManagerConfig::set_response_timeout`), so a hung Redis
     /// surfaces as an error instead of hanging request handlers. Default: 2 seconds.
     #[must_use]
-    pub fn response_timeout(mut self, d: std::time::Duration) -> Self {
+    pub const fn response_timeout(mut self, d: std::time::Duration) -> Self {
         self.response_timeout = d;
         self
     }

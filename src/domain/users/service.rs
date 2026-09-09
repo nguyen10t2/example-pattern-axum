@@ -36,7 +36,7 @@ pub struct UserService<R: UserRepository> {
 }
 
 impl<R: UserRepository> UserService<R> {
-    pub fn new(
+    pub const fn new(
         repo: R,
         cache: Arc<Cache>,
         argon2: Arc<Argon2<'static>>,

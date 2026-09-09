@@ -30,7 +30,7 @@ pub struct ExpenseService<ER: ExpenseRepository, GR: GroupRepository> {
 }
 
 impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
-    pub fn new(expense_repo: ER, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
+    pub const fn new(expense_repo: ER, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
         Self { expense_repo, group_repo, cache, pool }
     }
 

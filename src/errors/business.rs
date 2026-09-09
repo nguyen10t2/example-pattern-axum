@@ -83,7 +83,8 @@ pub enum BusinessError {
 }
 
 impl BusinessError {
-    pub fn status_code(&self) -> StatusCode {
+    #[must_use]
+    pub const fn status_code(&self) -> StatusCode {
         match self {
             Self::Unauthorized | Self::InvalidCredentials | Self::InvalidSession => StatusCode::UNAUTHORIZED,
             Self::Forbidden
@@ -110,7 +111,8 @@ impl BusinessError {
         }
     }
 
-    pub fn error_code(&self) -> &str {
+    #[must_use]
+    pub const fn error_code(&self) -> &str {
         match self {
             Self::Unauthorized => error_codes::UNAUTHORIZED,
             Self::Forbidden => error_codes::FORBIDDEN,

@@ -6,7 +6,8 @@ use crate::domain::settlements::{
 pub struct SettlementMapper;
 
 impl SettlementMapper {
-    pub fn to_response(entity: &SettlementEntity) -> SettlementResponse {
+    #[must_use]
+    pub const fn to_response(entity: &SettlementEntity) -> SettlementResponse {
         SettlementResponse {
             id: entity.id,
             group_id: entity.group_id,
@@ -21,6 +22,7 @@ impl SettlementMapper {
         }
     }
 
+    #[must_use]
     pub fn to_response_with_users(entity: &SettlementWithUsers) -> SettlementResponse {
         SettlementResponse {
             id: entity.id,

@@ -10,7 +10,8 @@ use uuid::Uuid;
 pub struct PostgresSettlementRepository;
 
 impl PostgresSettlementRepository {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }

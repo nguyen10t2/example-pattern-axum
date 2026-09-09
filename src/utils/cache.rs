@@ -46,7 +46,8 @@ pub struct RedisCache {
 }
 
 impl RedisCache {
-    pub fn new(manager: redis::aio::ConnectionManager) -> Self {
+    #[must_use]
+    pub const fn new(manager: redis::aio::ConnectionManager) -> Self {
         Self { manager }
     }
 }
@@ -76,14 +77,15 @@ pub struct MemoryCache {
 }
 
 impl MemoryCache {
+    #[must_use]
     pub fn new() -> Self {
         Self { store: Arc::new(DashMap::new()) }
     }
 }
 
 impl CacheStore for MemoryCache {
-    async fn get_raw(&self, key: &str) -> Option<String> {
-        match self.store.entry(key.to_string()) {
+    fn get_raw(&self, key: &str) -> impl Future<Output = Option<String>> + Send {
+        std::future::ready(match self.store.entry(key.to_string()) {
             dashmap::mapref::entry::Entry::Occupied(entry) => {
                 if Instant::now() < entry.get().1 {
                     Some(entry.get().0.clone())
@@ -93,16 +95,18 @@ impl CacheStore for MemoryCache {
                 }
             }
             dashmap::mapref::entry::Entry::Vacant(_) => None,
-        }
+        })
     }
 
-    async fn set_raw(&self, key: &str, value: &str, expiration_secs: u64) {
+    fn set_raw(&self, key: &str, value: &str, expiration_secs: u64) -> impl Future<Output = ()> + Send {
         let expires_at = Instant::now() + Duration::from_secs(expiration_secs);
         self.store.insert(key.to_string(), (value.to_string(), expires_at));
+        std::future::ready(())
     }
 
-    async fn delete(&self, key: &str) {
+    fn delete(&self, key: &str) -> impl Future<Output = ()> + Send {
         self.store.remove(key);
+        std::future::ready(())
     }
 }
 

@@ -13,7 +13,8 @@ use uuid::Uuid;
 pub struct PostgresExpenseRepository;
 
 impl PostgresExpenseRepository {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }

@@ -8,12 +8,13 @@ pub struct RedisRateLimiter {
 }
 
 impl RedisRateLimiter {
-    pub fn new(manager: redis::aio::ConnectionManager) -> Self {
+    #[must_use]
+    pub const fn new(manager: redis::aio::ConnectionManager) -> Self {
         Self { manager }
     }
 
     /// Increments key in Redis and sets expiration on initial hit.
-    /// Returns `true` if under or equal to max_requests, `false` otherwise.
+    /// Returns `true` if under or equal to `max_requests`, `false` otherwise.
     pub async fn check_rate_limit(&self, key: &str, max_requests: u32, duration: Duration) -> bool {
         let mut conn = self.manager.clone();
         let count_res: Result<i64, redis::RedisError> = conn.incr(key, 1).await;
@@ -21,10 +22,10 @@ impl RedisRateLimiter {
         match count_res {
             Ok(current) => {
                 if current == 1 {
-                    let duration_secs = duration.as_secs().max(1) as i64;
+                    let duration_secs = duration.as_secs().max(1).cast_signed();
                     let _: Result<(), redis::RedisError> = conn.expire(key, duration_secs).await;
                 }
-                current <= max_requests as i64
+                current <= i64::from(max_requests)
             }
             Err(e) => {
                 tracing::warn!("Redis rate limiter error: {e}");
@@ -66,6 +67,7 @@ impl RedisRateLimiter {
     }
 }
 
+#[must_use]
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
     headers
         .get("x-forwarded-for")

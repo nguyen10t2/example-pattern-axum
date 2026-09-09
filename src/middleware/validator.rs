@@ -48,7 +48,7 @@ where
 
         value.validate().map_err(|e| AppError::Business(BusinessError::ValidationError(e.to_string())))?;
 
-        Ok(ValidatedJson(value))
+        Ok(Self(value))
     }
 }
 
@@ -82,7 +82,7 @@ where
             .await
             .map_err(|e| AppError::Business(BusinessError::BadRequest(format!("Invalid path parameter: {e}"))))?;
 
-        Ok(ValidatedPath(value))
+        Ok(Self(value))
     }
 }
 
@@ -116,6 +116,6 @@ where
             .await
             .map_err(|e| AppError::Business(BusinessError::BadRequest(format!("Invalid query parameter: {e}"))))?;
 
-        Ok(ValidatedQuery(value))
+        Ok(Self(value))
     }
 }

@@ -26,7 +26,7 @@ pub struct SettlementService<SR: SettlementRepository, GR: GroupRepository> {
 }
 
 impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
-    pub fn new(settlement_repo: SR, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
+    pub const fn new(settlement_repo: SR, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
         Self { settlement_repo, group_repo, cache, pool }
     }
 

@@ -14,6 +14,7 @@ use super::{AppError, BusinessError};
 ///     map_unique_violation(err, &[("email", &entity.email)])
 /// })?;
 /// ```
+#[must_use]
 pub fn map_unique_violation(err: sqlx::Error, mappings: &[(&str, &str)]) -> AppError {
     match &err {
         sqlx::Error::Database(db_err) if db_err.code().is_some_and(|c| c == "23505") => {
