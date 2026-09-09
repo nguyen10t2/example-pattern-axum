@@ -71,6 +71,5 @@ pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
         .get("x-forwarded-for")
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "127.0.0.1".to_string())
+        .map_or_else(|| "127.0.0.1".to_string(), |s| s.trim().to_string())
 }

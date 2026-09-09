@@ -131,7 +131,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         group_id: Uuid,
         current_user_id: Uuid,
     ) -> Result<GroupSummaryResponse, AppError> {
-        let cache_key = format!("group_summary:{}", group_id);
+        let cache_key = format!("group_summary:{group_id}");
 
         // Fetch members once; reused for both membership check and summary building
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
@@ -231,9 +231,9 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             .map_err(|err| map_unique_violation(err, &[("group_members", "already joined")]))?;
 
         let user = self.user_repo.find_by_id(&self.pool, data.user_id).await?;
-        let full_name = user.map(|u| u.full_name).unwrap_or_else(|| "Unknown Member".to_string());
+        let full_name = user.map_or_else(|| "Unknown Member".to_string(), |u| u.full_name);
 
-        self.cache.delete(&format!("group_summary:{}", group_id)).await;
+        self.cache.delete(&format!("group_summary:{group_id}")).await;
 
         Ok(GroupMemberResponse {
             group_id: member.group_id,
@@ -269,7 +269,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             return Err(AppError::Business(BusinessError::GroupNotFound));
         }
 
-        self.cache.delete(&format!("group_summary:{}", id)).await;
+        self.cache.delete(&format!("group_summary:{id}")).await;
         Ok(())
     }
 

@@ -6,19 +6,19 @@ use std::collections::HashMap;
 
 #[test]
 fn test_i18n_english_translation() {
-    let msg = t(error_codes::UNAUTHORIZED, "en", None);
+    let msg = t(error_codes::UNAUTHORIZED, "en", None::<&HashMap<&str, &str>>);
     assert_eq!(msg, "Unauthorized");
 
-    let msg2 = t(error_codes::GROUP_NOT_FOUND, "en", None);
+    let msg2 = t(error_codes::GROUP_NOT_FOUND, "en", None::<&HashMap<&str, &str>>);
     assert_eq!(msg2, "Group not found or deleted");
 }
 
 #[test]
 fn test_i18n_vietnamese_translation() {
-    let msg = t(error_codes::UNAUTHORIZED, "vi", None);
+    let msg = t(error_codes::UNAUTHORIZED, "vi", None::<&HashMap<&str, &str>>);
     assert_eq!(msg, "Không có quyền truy cập");
 
-    let msg2 = t(error_codes::GROUP_NOT_FOUND, "vi", None);
+    let msg2 = t(error_codes::GROUP_NOT_FOUND, "vi", None::<&HashMap<&str, &str>>);
     assert_eq!(msg2, "Không tìm thấy nhóm");
 }
 

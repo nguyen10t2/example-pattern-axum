@@ -143,8 +143,8 @@ impl<R: UserRepository> UserService<R> {
                 }
                 user
             }
-            None => match self.repo.find_by_email(&self.pool, &google_user.email).await? {
-                Some(user) => {
+            None => {
+                if let Some(user) = self.repo.find_by_email(&self.pool, &google_user.email).await? {
                     let updated = self
                         .repo
                         .update(
@@ -159,8 +159,7 @@ impl<R: UserRepository> UserService<R> {
                         .await?;
                     info!(user_id = %updated.id, email = %google_user.email, "Linked Google account to existing user");
                     updated
-                }
-                None => {
+                } else {
                     let new_user = NewUserEntity {
                         id: Uuid::now_v7(),
                         full_name: google_user.name,
@@ -178,7 +177,7 @@ impl<R: UserRepository> UserService<R> {
                     info!(user_id = %created.id, email = %created.email, "Created new user via Google Sign-In");
                     created
                 }
-            },
+            }
         };
 
         let tokens = self.create_session(user.id).await?;
@@ -231,7 +230,7 @@ impl<R: UserRepository> UserService<R> {
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::Business(BusinessError::InvalidSession))?;
 
         let new_jti = Uuid::now_v7().to_string();
-        let new_key = format!("refreshToken:{}", new_jti);
+        let new_key = format!("refreshToken:{new_jti}");
 
         let session_key = format!("sessions:{}", claims.sub);
         let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
@@ -250,7 +249,7 @@ impl<R: UserRepository> UserService<R> {
     }
 
     pub async fn find_by_id(&self, id: Uuid) -> Result<UserResponse, AppError> {
-        let key = format!("user:{}", id);
+        let key = format!("user:{id}");
         if let Some(cached) = self.cache.get::<UserResponse>(&key).await {
             return Ok(cached);
         }
@@ -282,7 +281,7 @@ impl<R: UserRepository> UserService<R> {
         let updated_user = self.repo.update(&self.pool, id, &update_entity).await?;
         let response = UserMapper::to_response(&updated_user);
 
-        let key = format!("user:{}", id);
+        let key = format!("user:{id}");
         self.cache.set(&key, &response, CACHE_EXPIRATION).await;
 
         Ok(response)
@@ -294,7 +293,7 @@ impl<R: UserRepository> UserService<R> {
             return Err(AppError::Business(BusinessError::UserNotFound(id.to_string())));
         }
 
-        let key = format!("user:{}", id);
+        let key = format!("user:{id}");
         self.cache.delete(&key).await;
         Ok(())
     }
@@ -318,13 +317,13 @@ impl<R: UserRepository> UserService<R> {
             .await?;
 
         // Invalidate active sessions
-        let session_key = format!("sessions:{}", user_id);
+        let session_key = format!("sessions:{user_id}");
         let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
 
-        self.cache.delete(&format!("user:{}", user_id)).await;
+        self.cache.delete(&format!("user:{user_id}")).await;
         self.cache.delete(&session_key).await;
         for jti in active_sessions {
-            self.cache.delete(&format!("refreshToken:{}", jti)).await;
+            self.cache.delete(&format!("refreshToken:{jti}")).await;
         }
 
         info!(user_id = %user_id, "User changed password");
@@ -371,7 +370,7 @@ impl<R: UserRepository> UserService<R> {
         self.cache.delete(&format!("user:{}", user.id)).await;
         self.cache.delete(&session_key).await;
         for jti in active_sessions {
-            self.cache.delete(&format!("refreshToken:{}", jti)).await;
+            self.cache.delete(&format!("refreshToken:{jti}")).await;
         }
 
         info!(user_id = %user.id, "User reset password");
@@ -383,8 +382,8 @@ impl<R: UserRepository> UserService<R> {
         let access_token = self.jwt_config.gen_access_token(user_id)?;
         let refresh_token = self.jwt_config.gen_refresh_token(user_id, &jti)?;
 
-        let key = format!("refreshToken:{}", jti);
-        let session_key = format!("sessions:{}", user_id);
+        let key = format!("refreshToken:{jti}");
+        let session_key = format!("sessions:{user_id}");
         let max_sessions = 5;
 
         let mut active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
@@ -394,7 +393,7 @@ impl<R: UserRepository> UserService<R> {
             let drain_count = active_sessions.len() - max_sessions;
             let oldest_sessions: Vec<String> = active_sessions.drain(0..drain_count).collect();
             for old_jti in oldest_sessions {
-                self.cache.delete(&format!("refreshToken:{}", old_jti)).await;
+                self.cache.delete(&format!("refreshToken:{old_jti}")).await;
             }
         }
 

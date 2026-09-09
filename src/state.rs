@@ -76,7 +76,7 @@ impl AppState {
         let connection_manager = redis_config.connect().await?;
 
         let cache = Arc::new(Cache::Redis(RedisCache::new(connection_manager.clone())));
-        let rate_limiter = RedisRateLimiter::new(connection_manager.clone());
+        let rate_limiter = RedisRateLimiter::new(connection_manager);
         let jwt_config = JwtConfig::from_env();
         let google_oauth = GoogleOAuthConfig::from_env();
 
@@ -100,16 +100,16 @@ impl AppState {
             group_repo.clone(),
             expense_repo.clone(),
             settlement_repo.clone(),
-            user_repo.clone(),
+            user_repo,
             cache.clone(),
             pool.clone(),
         ));
 
         let expense_service =
-            Arc::new(ExpenseService::new(expense_repo.clone(), group_repo.clone(), cache.clone(), pool.clone()));
+            Arc::new(ExpenseService::new(expense_repo, group_repo.clone(), cache.clone(), pool.clone()));
 
         let settlement_service =
-            Arc::new(SettlementService::new(settlement_repo.clone(), group_repo.clone(), cache.clone(), pool.clone()));
+            Arc::new(SettlementService::new(settlement_repo, group_repo, cache.clone(), pool.clone()));
 
         Ok(Self {
             user_service,
