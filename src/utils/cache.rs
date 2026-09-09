@@ -11,12 +11,16 @@ use std::{
 pub use crate::config::constants::{CACHE_EXPIRATION, OTP_EXPIRATION, REFRESH_TOKEN_EXPIRATION};
 
 pub trait CacheStore: Send + Sync {
+    /// Đọc string thô theo key, `None` khi miss/hết hạn/lỗi.
     fn get_raw(&self, key: &str) -> impl Future<Output = Option<String>> + Send;
+    /// Ghi string thô kèm TTL (giây).
     fn set_raw(&self, key: &str, value: &str, expiration_secs: u64) -> impl Future<Output = ()> + Send;
+    /// Xóa key (idempotent).
     fn delete(&self, key: &str) -> impl Future<Output = ()> + Send;
 }
 
 pub trait CacheStoreExt: CacheStore {
+    /// Đọc + deserialize JSON theo key.
     fn get<T: DeserializeOwned>(&self, key: &str) -> impl Future<Output = Option<T>> + Send {
         async move {
             let raw = self.get_raw(key).await?;
@@ -24,6 +28,7 @@ pub trait CacheStoreExt: CacheStore {
         }
     }
 
+    /// Serialize + ghi JSON theo key kèm TTL (giây).
     fn set<T: Serialize + Send + Sync>(
         &self,
         key: &str,
@@ -46,7 +51,9 @@ pub struct RedisCache {
 }
 
 impl RedisCache {
-    pub fn new(manager: redis::aio::ConnectionManager) -> Self {
+    /// Bọc Redis connection manager dùng chung thành cache.
+    #[must_use]
+    pub const fn new(manager: redis::aio::ConnectionManager) -> Self {
         Self { manager }
     }
 }
@@ -76,14 +83,16 @@ pub struct MemoryCache {
 }
 
 impl MemoryCache {
+    /// Cache in-memory cho test (hết hạn theo `Instant`).
+    #[must_use]
     pub fn new() -> Self {
         Self { store: Arc::new(DashMap::new()) }
     }
 }
 
 impl CacheStore for MemoryCache {
-    async fn get_raw(&self, key: &str) -> Option<String> {
-        match self.store.entry(key.to_string()) {
+    fn get_raw(&self, key: &str) -> impl Future<Output = Option<String>> + Send {
+        std::future::ready(match self.store.entry(key.to_string()) {
             dashmap::mapref::entry::Entry::Occupied(entry) => {
                 if Instant::now() < entry.get().1 {
                     Some(entry.get().0.clone())
@@ -93,26 +102,25 @@ impl CacheStore for MemoryCache {
                 }
             }
             dashmap::mapref::entry::Entry::Vacant(_) => None,
-        }
+        })
     }
 
-    async fn set_raw(&self, key: &str, value: &str, expiration_secs: u64) {
+    fn set_raw(&self, key: &str, value: &str, expiration_secs: u64) -> impl Future<Output = ()> + Send {
         let expires_at = Instant::now() + Duration::from_secs(expiration_secs);
         self.store.insert(key.to_string(), (value.to_string(), expires_at));
+        std::future::ready(())
     }
 
-    async fn delete(&self, key: &str) {
+    fn delete(&self, key: &str) -> impl Future<Output = ()> + Send {
         self.store.remove(key);
+        std::future::ready(())
     }
 }
 
-/// Closed set of cache backends used by the application.
+/// Tập backend cache của app, dispatch tĩnh thay vì `dyn`.
 ///
-/// Static (enum) dispatch instead of `dyn CacheStore`: the set of backends is
-/// fixed (`Redis` in production, `Memory` in tests), so a trait object buys
-/// nothing but costs a vtable, `Send`/`Sync` plumbing and — with native
-/// `async fn` in traits (edition 2024) — object safety itself. New backends
-/// are added as variants here.
+/// Chỉ có `Redis` (production) và `Memory` (test) nên trait object chỉ thêm vtable
+/// mà không có lợi gì — thêm backend mới thì thêm variant ở đây.
 #[derive(Clone)]
 pub enum Cache {
     Redis(RedisCache),

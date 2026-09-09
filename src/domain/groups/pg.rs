@@ -13,7 +13,9 @@ use uuid::Uuid;
 pub struct PostgresGroupRepository;
 
 impl PostgresGroupRepository {
-    pub fn new() -> Self {
+    /// Tạo repository group (stateless).
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }
@@ -100,7 +102,7 @@ impl GroupRepository for PostgresGroupRepository {
         user_id: Uuid,
     ) -> Result<Vec<GroupWithBalanceEntity>, sqlx::Error> {
         sqlx::query_as::<Postgres, GroupWithBalanceEntity>(
-            r#"
+            r"
             WITH user_paid AS (
                 SELECT group_id, SUM(amount)::bigint AS total
                 FROM expenses
@@ -148,7 +150,7 @@ impl GroupRepository for PostgresGroupRepository {
             LEFT JOIN user_sent us ON g.id = us.group_id
             LEFT JOIN user_received ur ON g.id = ur.group_id
             WHERE gm.user_id = $1 AND g.deleted_at IS NULL
-            "#,
+            ",
         )
         .bind(user_id)
         .fetch_all(executor)

@@ -11,11 +11,17 @@ use crate::{
     state::AppState,
 };
 
+/// User đã xác thực, trích từ JWT bởi [`require_auth`].
 #[derive(Debug, Clone, Copy)]
 pub struct AuthUser(pub Uuid);
 
-/// Axum modern middleware using `from_fn` / `from_fn_with_state`.
-/// Verifies Bearer token, extracts user ID from JWT claims, and inserts `AuthUser` into request extensions.
+/// Middleware xác thực Bearer token, nhét `AuthUser` vào request extensions.
+///
+/// Để async vì axum `from_fn` bắt buộc handler async (I/O thật: đọc header + verify JWT).
+///
+/// # Errors
+///
+/// Trả `Unauthorized` khi thiếu/sai header, token hết hạn hoặc `sub` không phải UUID.
 pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Result<Response, AppError> {
     let auth_header = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
 
@@ -40,7 +46,9 @@ where
 {
     type Rejection = AppError;
 
+    // Giữ `async` vì trait `FromRequestParts` của axum bắt buộc — body không có `.await` nào.
+    // (Warning `unused_async_trait_impl` ở đây được chấp nhận có lý do, xem PLAN_RUST_HARDENING.md.)
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        parts.extensions.get::<AuthUser>().copied().ok_or(AppError::Business(BusinessError::Unauthorized))
+        parts.extensions.get::<Self>().copied().ok_or(AppError::Business(BusinessError::Unauthorized))
     }
 }

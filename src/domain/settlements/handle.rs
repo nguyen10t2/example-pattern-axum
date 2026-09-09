@@ -17,6 +17,7 @@ use crate::{
     state::AppState,
 };
 
+/// Dựng routes settlement (tất cả sau auth).
 pub fn settlement_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/", post(handle_create_settlement))
@@ -25,6 +26,11 @@ pub fn settlement_router(state: AppState) -> Router<AppState> {
         .route_layer(axum::middleware::from_fn_with_state(state, crate::middleware::require_auth))
 }
 
+/// Ghi nhận giao dịch trả nợ, trả `201 Created`.
+///
+/// # Errors
+///
+/// Trả `NotGroupMember`/`UserNotInGroup` khi sai thành viên.
 pub async fn handle_create_settlement(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -34,6 +40,11 @@ pub async fn handle_create_settlement(
     Ok(SuccessResponse::created(settlement, "Settlement recorded successfully"))
 }
 
+/// Lấy settlement theo id (phải là thành viên nhóm).
+///
+/// # Errors
+///
+/// Trả `SettlementNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_settlement_by_id(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -43,6 +54,11 @@ pub async fn handle_get_settlement_by_id(
     Ok(SuccessResponse::with_message(settlement, "Settlement found successfully"))
 }
 
+/// Liệt kê settlements của nhóm có phân trang.
+///
+/// # Errors
+///
+/// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_settlements_by_group(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -53,6 +69,11 @@ pub async fn handle_get_settlements_by_group(
     Ok(SuccessResponse::with_message(settlements, "Settlements for group retrieved successfully"))
 }
 
+/// Hủy settlement (2 bên tham gia hoặc admin).
+///
+/// # Errors
+///
+/// Trả `SettlementNotFound`, `NotGroupMember` hoặc `DeletePermissionDenied`.
 pub async fn handle_cancel_settlement(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,

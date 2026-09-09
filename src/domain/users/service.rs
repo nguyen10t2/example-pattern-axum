@@ -4,6 +4,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
+    config::constants::MAX_SESSIONS_PER_USER,
     domain::{
         Currency,
         users::{
@@ -36,7 +37,8 @@ pub struct UserService<R: UserRepository> {
 }
 
 impl<R: UserRepository> UserService<R> {
-    pub fn new(
+    /// Ghép repo, cache, JWT và mailer thành service user.
+    pub const fn new(
         repo: R,
         cache: Arc<Cache>,
         argon2: Arc<Argon2<'static>>,
@@ -47,6 +49,11 @@ impl<R: UserRepository> UserService<R> {
         Self { repo, cache, argon2, jwt_config, mailer, pool }
     }
 
+    /// Gửi OTP đăng ký qua email, lưu cache 2 phút.
+    ///
+    /// # Errors
+    ///
+    /// Trả `UserAlreadyExists` nếu email đã có tài khoản.
     pub async fn request_otp(&self, email: &str) -> Result<(), AppError> {
         let existing_user = self.repo.find_by_email(&self.pool, email).await?;
         if existing_user.is_some() {
@@ -62,6 +69,11 @@ impl<R: UserRepository> UserService<R> {
         Ok(())
     }
 
+    /// Tạo user mới sau khi đối chiếu OTP.
+    ///
+    /// # Errors
+    ///
+    /// Trả `InvalidOtp` khi OTP sai/hết hạn, `Conflict` khi email trùng, lỗi hash/DB khi ghi.
     pub async fn sign_up(&self, data: SignUpRequest) -> Result<UserResponse, AppError> {
         let key = format!("otp:{}", data.email.to_lowercase());
         let cached_otp: Option<String> = self.cache.get(&key).await;
@@ -100,6 +112,11 @@ impl<R: UserRepository> UserService<R> {
         Ok(UserMapper::to_response(&created_user))
     }
 
+    /// Đăng nhập email/password, trả cặp access + refresh token.
+    ///
+    /// # Errors
+    ///
+    /// Trả `InvalidCredentials` khi email không tồn tại hoặc sai password.
     pub async fn sign_in(&self, data: SignInRequest) -> Result<TokensResponse, AppError> {
         let user = self.repo.find_by_email(&self.pool, &data.email).await?;
         let Some(user) = user else {
@@ -122,6 +139,11 @@ impl<R: UserRepository> UserService<R> {
         Ok(tokens)
     }
 
+    /// Đăng nhập Google: link vào account cùng email nếu có, không thì tạo mới.
+    ///
+    /// # Errors
+    ///
+    /// Trả `EmailNotVerified` khi Google chưa verify email này.
     pub async fn sign_in_with_google(&self, google_user: GoogleUserInfo) -> Result<TokensResponse, AppError> {
         if !google_user.email_verified {
             return Err(AppError::Business(BusinessError::EmailNotVerified));
@@ -143,8 +165,8 @@ impl<R: UserRepository> UserService<R> {
                 }
                 user
             }
-            None => match self.repo.find_by_email(&self.pool, &google_user.email).await? {
-                Some(user) => {
+            None => {
+                if let Some(user) = self.repo.find_by_email(&self.pool, &google_user.email).await? {
                     let updated = self
                         .repo
                         .update(
@@ -159,8 +181,7 @@ impl<R: UserRepository> UserService<R> {
                         .await?;
                     info!(user_id = %updated.id, email = %google_user.email, "Linked Google account to existing user");
                     updated
-                }
-                None => {
+                } else {
                     let new_user = NewUserEntity {
                         id: Uuid::now_v7(),
                         full_name: google_user.name,
@@ -178,7 +199,7 @@ impl<R: UserRepository> UserService<R> {
                     info!(user_id = %created.id, email = %created.email, "Created new user via Google Sign-In");
                     created
                 }
-            },
+            }
         };
 
         let tokens = self.create_session(user.id).await?;
@@ -186,6 +207,11 @@ impl<R: UserRepository> UserService<R> {
         Ok(tokens)
     }
 
+    /// Đăng xuất: thu hồi refresh token khỏi cache (idempotent, token lạ thì bỏ qua).
+    ///
+    /// # Errors
+    ///
+    /// Luôn `Ok` — không có lỗi nghiệp vụ.
     pub async fn sign_out(&self, refresh_token: Option<&str>) -> Result<(), AppError> {
         let Some(token) = refresh_token else {
             return Ok(());
@@ -212,6 +238,11 @@ impl<R: UserRepository> UserService<R> {
         Ok(())
     }
 
+    /// Xoay refresh token: cấp cặp mới, thu hồi token cũ (chống replay).
+    ///
+    /// # Errors
+    ///
+    /// Trả `InvalidSession` khi thiếu token, token hết hạn hoặc đã bị thu hồi.
     pub async fn refresh(&self, old_refresh_token: Option<&str>) -> Result<TokensResponse, AppError> {
         let Some(token) = old_refresh_token else {
             return Err(AppError::Business(BusinessError::InvalidSession));
@@ -231,7 +262,7 @@ impl<R: UserRepository> UserService<R> {
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::Business(BusinessError::InvalidSession))?;
 
         let new_jti = Uuid::now_v7().to_string();
-        let new_key = format!("refreshToken:{}", new_jti);
+        let new_key = format!("refreshToken:{new_jti}");
 
         let session_key = format!("sessions:{}", claims.sub);
         let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
@@ -249,8 +280,13 @@ impl<R: UserRepository> UserService<R> {
         Ok(TokensResponse { access_token: new_access_token, refresh_token: new_refresh_token })
     }
 
+    /// Lấy user theo id, ưu tiên cache 1 phút.
+    ///
+    /// # Errors
+    ///
+    /// Trả `UserNotFound` khi id không tồn tại.
     pub async fn find_by_id(&self, id: Uuid) -> Result<UserResponse, AppError> {
-        let key = format!("user:{}", id);
+        let key = format!("user:{id}");
         if let Some(cached) = self.cache.get::<UserResponse>(&key).await {
             return Ok(cached);
         }
@@ -264,12 +300,22 @@ impl<R: UserRepository> UserService<R> {
         Ok(response)
     }
 
+    /// Lấy user theo email (đọc thẳng DB, không cache).
+    ///
+    /// # Errors
+    ///
+    /// Trả `UserNotFound` khi email không tồn tại.
     pub async fn find_by_email(&self, email: &str) -> Result<UserResponse, AppError> {
         let user = self.repo.find_by_email(&self.pool, email).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(email.to_string())))?;
         Ok(UserMapper::to_response(&user))
     }
 
+    /// Cập nhật profile rồi refresh cache user.
+    ///
+    /// # Errors
+    ///
+    /// Trả lỗi DB khi ghi thất bại.
     pub async fn update(&self, id: Uuid, data: UpdateUserRequest) -> Result<UserResponse, AppError> {
         let update_entity = UpdateUserEntity {
             full_name: data.full_name,
@@ -282,23 +328,33 @@ impl<R: UserRepository> UserService<R> {
         let updated_user = self.repo.update(&self.pool, id, &update_entity).await?;
         let response = UserMapper::to_response(&updated_user);
 
-        let key = format!("user:{}", id);
+        let key = format!("user:{id}");
         self.cache.set(&key, &response, CACHE_EXPIRATION).await;
 
         Ok(response)
     }
 
+    /// Xóa mềm user rồi xóa cache.
+    ///
+    /// # Errors
+    ///
+    /// Trả `UserNotFound` khi id không tồn tại.
     pub async fn delete(&self, id: Uuid) -> Result<(), AppError> {
         let result = self.repo.soft_delete(&self.pool, id).await?;
         if result.is_none() {
             return Err(AppError::Business(BusinessError::UserNotFound(id.to_string())));
         }
 
-        let key = format!("user:{}", id);
+        let key = format!("user:{id}");
         self.cache.delete(&key).await;
         Ok(())
     }
 
+    /// Đổi password sau khi verify mật khẩu cũ, thu hồi mọi session đang active.
+    ///
+    /// # Errors
+    ///
+    /// Trả `UserNotFound` khi user không tồn tại, `InvalidCredentials` khi sai mật khẩu cũ.
     pub async fn change_password(&self, user_id: Uuid, data: ChangePasswordRequest) -> Result<(), AppError> {
         let user = self.repo.find_by_id(&self.pool, user_id).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(user_id.to_string())))?;
@@ -318,19 +374,24 @@ impl<R: UserRepository> UserService<R> {
             .await?;
 
         // Invalidate active sessions
-        let session_key = format!("sessions:{}", user_id);
+        let session_key = format!("sessions:{user_id}");
         let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
 
-        self.cache.delete(&format!("user:{}", user_id)).await;
+        self.cache.delete(&format!("user:{user_id}")).await;
         self.cache.delete(&session_key).await;
         for jti in active_sessions {
-            self.cache.delete(&format!("refreshToken:{}", jti)).await;
+            self.cache.delete(&format!("refreshToken:{jti}")).await;
         }
 
         info!(user_id = %user_id, "User changed password");
         Ok(())
     }
 
+    /// Gửi OTP quên mật khẩu. Luôn `Ok` kể cả email lạ để chống dò email.
+    ///
+    /// # Errors
+    ///
+    /// Luôn `Ok` — không có lỗi nghiệp vụ.
     pub async fn request_forgot_password_otp(&self, email: &str) -> Result<(), AppError> {
         let user = self.repo.find_by_email(&self.pool, email).await?;
         if user.is_none() {
@@ -346,6 +407,11 @@ impl<R: UserRepository> UserService<R> {
         Ok(())
     }
 
+    /// Reset password bằng OTP, thu hồi mọi session đang active.
+    ///
+    /// # Errors
+    ///
+    /// Trả `InvalidOtp` khi OTP sai/hết hạn, `UserNotFound` khi email không tồn tại.
     pub async fn reset_password(&self, data: ResetPasswordRequest) -> Result<(), AppError> {
         let key = format!("forgot_otp:{}", data.email.to_lowercase());
         let cached_otp: Option<String> = self.cache.get(&key).await;
@@ -371,30 +437,34 @@ impl<R: UserRepository> UserService<R> {
         self.cache.delete(&format!("user:{}", user.id)).await;
         self.cache.delete(&session_key).await;
         for jti in active_sessions {
-            self.cache.delete(&format!("refreshToken:{}", jti)).await;
+            self.cache.delete(&format!("refreshToken:{jti}")).await;
         }
 
         info!(user_id = %user.id, "User reset password");
         Ok(())
     }
 
+    /// Tạo cặp token và lưu session; quá số session tối đa thì đuổi session cũ nhất.
+    ///
+    /// # Errors
+    ///
+    /// Trả lỗi khi sign JWT thất bại.
     async fn create_session(&self, user_id: Uuid) -> Result<TokensResponse, AppError> {
         let jti = Uuid::now_v7().to_string();
         let access_token = self.jwt_config.gen_access_token(user_id)?;
         let refresh_token = self.jwt_config.gen_refresh_token(user_id, &jti)?;
 
-        let key = format!("refreshToken:{}", jti);
-        let session_key = format!("sessions:{}", user_id);
-        let max_sessions = 5;
+        let key = format!("refreshToken:{jti}");
+        let session_key = format!("sessions:{user_id}");
 
         let mut active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
         active_sessions.push(jti);
 
-        if active_sessions.len() > max_sessions {
-            let drain_count = active_sessions.len() - max_sessions;
+        if active_sessions.len() > MAX_SESSIONS_PER_USER {
+            let drain_count = active_sessions.len() - MAX_SESSIONS_PER_USER;
             let oldest_sessions: Vec<String> = active_sessions.drain(0..drain_count).collect();
             for old_jti in oldest_sessions {
-                self.cache.delete(&format!("refreshToken:{}", old_jti)).await;
+                self.cache.delete(&format!("refreshToken:{old_jti}")).await;
             }
         }
 

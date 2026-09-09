@@ -1,11 +1,8 @@
 use super::{AppError, BusinessError};
 
-/// Map a unique constraint violation (Postgres 23505) to `BusinessError`.
+/// Map lỗi trùng unique (Postgres 23505) sang `BusinessError`.
 ///
-/// Takes a list of `(constraint_pattern, error_message)` pairs.
-/// If the DB error is a unique violation and its constraint name contains
-/// a pattern, returns the corresponding business error. Otherwise falls
-/// back to `AppError::from(err)`.
+/// Nhận danh sách cặp `(mẫu-tên-constraint, message)`; không khớp thì trả `AppError::from(err)`.
 ///
 /// # Example
 ///
@@ -14,6 +11,7 @@ use super::{AppError, BusinessError};
 ///     map_unique_violation(err, &[("email", &entity.email)])
 /// })?;
 /// ```
+#[must_use]
 pub fn map_unique_violation(err: sqlx::Error, mappings: &[(&str, &str)]) -> AppError {
     match &err {
         sqlx::Error::Database(db_err) if db_err.code().is_some_and(|c| c == "23505") => {

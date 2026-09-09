@@ -17,11 +17,21 @@ pub struct SplitContext {
     pub shares: Vec<SplitShareInput>,
 }
 
+/// Kiểm tra một cách chia có hợp lệ với tổng tiền không.
 pub trait SplitStrategy: Send + Sync {
+    /// Validate context theo quy tắc của từng loại split.
+    ///
+    /// # Errors
+    ///
+    /// Trả `BadRequest` khi split sai quy tắc.
     fn validate(&self, context: &SplitContext) -> Result<(), AppError>;
 }
 
-/// Shared check for amount-based strategies: share amounts must add up to the total.
+/// Check chung cho strategy theo số tiền: tổng shares phải bằng total.
+///
+/// # Errors
+///
+/// Trả `BadRequest` khi tổng shares khác total.
 fn validate_sum(context: &SplitContext) -> Result<(), AppError> {
     let sum: i64 = context.shares.iter().map(|s| s.share_amount).sum();
     if sum != context.total_amount {
@@ -30,18 +40,23 @@ fn validate_sum(context: &SplitContext) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Enforces an even split: every share must be `floor(total / n)` or `ceil(total / n)`.
+/// Ép chia đều: mỗi share phải là `floor(total / n)` hoặc `ceil(total / n)`.
 ///
-/// Integer totals are rarely divisible (e.g. 100 / 3), so strict per-share
-/// equality is unimplementable — 33/33/34 is a valid equal split while 90/5/5
-/// is not. Combined with [`validate_sum`], this accepts exactly the splits
-/// where the division remainder is spread one unit per share.
+/// Tổng nguyên hiếm khi chia hết (vd 100 / 3) nên không thể đòi bằng nhau tuyệt đối —
+/// 33/33/34 là split đều hợp lệ, còn 90/5/5 thì không. Kết hợp với [`validate_sum`],
+/// rule này chỉ nhận đúng các split rải phần dư mỗi share 1 đơn vị.
+///
+/// # Errors
+///
+/// Trả `BadRequest` khi có share lệch khỏi `floor`/`ceil`.
 fn validate_equal_distribution(context: &SplitContext) -> Result<(), AppError> {
     let count = context.shares.len();
     if count == 0 {
         return Ok(());
     }
-    let base = context.total_amount.div_euclid(count as i64);
+    let count =
+        i64::try_from(count).map_err(|_| AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())))?;
+    let base = context.total_amount.div_euclid(count);
     let evenly_spread = context.shares.iter().all(|s| s.share_amount == base || s.share_amount == base + 1);
     if evenly_spread { Ok(()) } else { Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string()))) }
 }
@@ -79,6 +94,8 @@ impl SplitStrategy for PercentageSplitStrategy {
 pub struct SplitStrategyFactory;
 
 impl SplitStrategyFactory {
+    /// Chọn strategy theo loại split của expense.
+    #[must_use]
     pub fn get_strategy(split_type: &SplitType) -> Box<dyn SplitStrategy> {
         match split_type {
             SplitType::EQUAL => Box::new(EqualSplitStrategy),

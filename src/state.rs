@@ -18,10 +18,7 @@ use crate::{
     },
 };
 
-/// Errors that can occur while building [`AppState`] from the environment.
-///
-/// All variants are fatal at startup: the caller is expected to log the error
-/// and exit instead of serving traffic with a half-initialized state.
+/// Các lỗi dựng [`AppState`] — đều fatal lúc boot: caller log rồi exit.
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateError {
     #[error("invalid argon2 config: {0}")]
@@ -57,14 +54,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Builds application state from the environment.
+    /// Dựng state từ env.
     ///
     /// # Errors
     ///
-    /// Returns an [`AppStateError`] if any required configuration is invalid
-    /// or if Redis cannot be reached within `REDIS_CONNECTION_TIMEOUT`.
-    /// The caller must treat this as fatal and exit (fail-fast) instead of
-    /// serving traffic with a half-initialized state.
+    /// Trả `AppStateError` khi config sai hoặc Redis unreachable — caller phải exit (fail-fast).
     pub async fn from_env() -> Result<Self, AppStateError> {
         let argon2 = Argon2Config::from_env().build_argon2()?;
         let argon2_arc = Arc::new(argon2);
@@ -76,7 +70,7 @@ impl AppState {
         let connection_manager = redis_config.connect().await?;
 
         let cache = Arc::new(Cache::Redis(RedisCache::new(connection_manager.clone())));
-        let rate_limiter = RedisRateLimiter::new(connection_manager.clone());
+        let rate_limiter = RedisRateLimiter::new(connection_manager);
         let jwt_config = JwtConfig::from_env();
         let google_oauth = GoogleOAuthConfig::from_env();
 
@@ -100,16 +94,16 @@ impl AppState {
             group_repo.clone(),
             expense_repo.clone(),
             settlement_repo.clone(),
-            user_repo.clone(),
+            user_repo,
             cache.clone(),
             pool.clone(),
         ));
 
         let expense_service =
-            Arc::new(ExpenseService::new(expense_repo.clone(), group_repo.clone(), cache.clone(), pool.clone()));
+            Arc::new(ExpenseService::new(expense_repo, group_repo.clone(), cache.clone(), pool.clone()));
 
         let settlement_service =
-            Arc::new(SettlementService::new(settlement_repo.clone(), group_repo.clone(), cache.clone(), pool.clone()));
+            Arc::new(SettlementService::new(settlement_repo, group_repo, cache.clone(), pool.clone()));
 
         Ok(Self {
             user_service,
@@ -126,6 +120,11 @@ impl AppState {
         })
     }
 
+    /// Chạy migrations pending trên pool đã khởi tạo.
+    ///
+    /// # Errors
+    ///
+    /// Trả `MigrateError` khi migration lỗi — caller phải exit, không được serve.
     pub async fn migrate(&self) -> Result<(), sqlx::migrate::MigrateError> {
         self.db_config.migrate(&self.db_pool).await
     }

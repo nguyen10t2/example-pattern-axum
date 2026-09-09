@@ -1,4 +1,4 @@
-use dsa::utils::jwt::JwtConfig;
+use dsa::{config::constants::JWT_REFRESH_TOKEN_EXPIRATION_SECS, utils::jwt::JwtConfig};
 use uuid::Uuid;
 
 #[test]
@@ -8,7 +8,7 @@ fn test_jwt_access_and_refresh_token_lifecycle() {
         issuer: "splitdebt".to_string(),
         audience: "splitdebt-users".to_string(),
         access_token_expiration_secs: 900,
-        refresh_token_expiration_secs: 604800,
+        refresh_token_expiration_secs: JWT_REFRESH_TOKEN_EXPIRATION_SECS,
     };
 
     let user_id = Uuid::now_v7();

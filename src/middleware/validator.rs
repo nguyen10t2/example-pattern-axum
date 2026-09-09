@@ -10,13 +10,8 @@ use validator::Validate;
 
 use crate::errors::{AppError, BusinessError};
 
-/// Axum custom extractor that automatically deserializes JSON and validates using `validator::Validate`.
-///
-/// - Deserializes JSON payload (`FromRequest`).
-/// - Runs `validator::Validate`.
-/// - Rejects malformed JSON with `400 Bad Request`.
-/// - Rejects invalid rules with `422 Unprocessable Entity` mapped through `AppError`.
-/// - Implements `Deref` and `DerefMut` for zero-overhead ergonomic access.
+/// Extractor JSON tự deserialize + validate: sai format → `400`, sai rule → `422`.
+/// Hỗ trợ `Deref`/`DerefMut` để dùng trực tiếp như `T`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValidatedJson<T>(pub T);
 
@@ -48,11 +43,11 @@ where
 
         value.validate().map_err(|e| AppError::Business(BusinessError::ValidationError(e.to_string())))?;
 
-        Ok(ValidatedJson(value))
+        Ok(Self(value))
     }
 }
 
-/// Custom Path extractor that converts URL parameter parse errors (e.g. invalid UUIDs) into JSON `AppError`.
+/// Extractor path param: parse lỗi (vd UUID sai) thì trả `AppError` JSON.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValidatedPath<T>(pub T);
 
@@ -82,11 +77,11 @@ where
             .await
             .map_err(|e| AppError::Business(BusinessError::BadRequest(format!("Invalid path parameter: {e}"))))?;
 
-        Ok(ValidatedPath(value))
+        Ok(Self(value))
     }
 }
 
-/// Custom Query extractor that converts URL query parse errors into JSON `AppError`.
+/// Extractor query param: parse lỗi thì trả `AppError` JSON.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValidatedQuery<T>(pub T);
 
@@ -116,6 +111,6 @@ where
             .await
             .map_err(|e| AppError::Business(BusinessError::BadRequest(format!("Invalid query parameter: {e}"))))?;
 
-        Ok(ValidatedQuery(value))
+        Ok(Self(value))
     }
 }

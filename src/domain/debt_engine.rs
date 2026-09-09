@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::errors::SystemError;
-
+/// Số dư ròng của một thành viên: dương = được nhận, âm = đang nợ.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserBalance {
@@ -11,6 +10,7 @@ pub struct UserBalance {
     pub net_amount: i64, // positive = owed money, negative = owes money
 }
 
+/// Một giao dịch trả nợ được gợi ý để cân bằng nhóm.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettlementSuggestion {
@@ -19,12 +19,14 @@ pub struct SettlementSuggestion {
     pub amount: i64,        // Amount to settle
 }
 
+/// Phần chia của một thành viên trong một expense (đầu vào engine).
 #[derive(Debug, Clone)]
 pub struct ShareForEngine {
     pub user_id: Uuid,
     pub amount: i64,
 }
 
+/// Một expense rút gọn (đầu vào engine).
 #[derive(Debug, Clone)]
 pub struct ExpenseForEngine {
     pub payer_id: Uuid,
@@ -32,6 +34,7 @@ pub struct ExpenseForEngine {
     pub shares: Vec<ShareForEngine>,
 }
 
+/// Một settlement đã chốt (đầu vào engine).
 #[derive(Debug, Clone)]
 pub struct SettlementForEngine {
     pub sender_id: Uuid,
@@ -140,15 +143,24 @@ impl DebtEngine {
         result
     }
 
-    pub async fn simplify_debts(balances: &[UserBalance]) -> Result<Vec<SettlementSuggestion>, SystemError> {
-        Ok(Self::simplify_debts_blocking(balances))
+    /// Gợi ý các giao dịch trả nợ tối thiểu từ bảng số dư (greedy + exact-match).
+    ///
+    /// Để sync vì thuần tính toán trên memory, không I/O — caller async cứ gọi trực tiếp,
+    /// không cần `spawn_blocking` với input cỡ nhóm chat.
+    #[must_use]
+    pub fn simplify_debts(balances: &[UserBalance]) -> Vec<SettlementSuggestion> {
+        Self::simplify_debts_blocking(balances)
     }
 
-    pub async fn calculate_net_balances(
+    /// Tính số dư ròng từng thành viên từ expenses và settlements đã chốt.
+    ///
+    /// Để sync vì lý do như [`DebtEngine::simplify_debts`].
+    #[must_use]
+    pub fn calculate_net_balances(
         user_ids: &[Uuid],
         expenses: &[ExpenseForEngine],
         settlements: &[SettlementForEngine],
-    ) -> Result<Vec<UserBalance>, SystemError> {
-        Ok(Self::calculate_net_balances_blocking(user_ids, expenses, settlements))
+    ) -> Vec<UserBalance> {
+        Self::calculate_net_balances_blocking(user_ids, expenses, settlements)
     }
 }

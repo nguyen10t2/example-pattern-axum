@@ -6,7 +6,9 @@ use crate::domain::settlements::{
 pub struct SettlementMapper;
 
 impl SettlementMapper {
-    pub fn to_response(entity: &SettlementEntity) -> SettlementResponse {
+    /// Map settlement entity sang response (chưa có tên 2 bên).
+    #[must_use]
+    pub const fn to_response(entity: &SettlementEntity) -> SettlementResponse {
         SettlementResponse {
             id: entity.id,
             group_id: entity.group_id,
@@ -21,6 +23,8 @@ impl SettlementMapper {
         }
     }
 
+    #[must_use]
+    /// Map settlement kèm user sang response.
     pub fn to_response_with_users(entity: &SettlementWithUsers) -> SettlementResponse {
         SettlementResponse {
             id: entity.id,
@@ -36,6 +40,7 @@ impl SettlementMapper {
         }
     }
 
+    /// Map danh sách settlement kèm user sang response.
     pub fn to_response_list_with_users(entities: &[SettlementWithUsers]) -> Vec<SettlementResponse> {
         entities.iter().map(Self::to_response_with_users).collect()
     }

@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::BuildHasher};
 
+/// Đoán ngôn ngữ (`en`/`vi`, mặc định `vi`) từ header `Accept-Language`.
+#[must_use]
 pub fn get_language_from_header(accept_language: Option<&str>) -> String {
     let Some(header) = accept_language else {
         return "vi".to_string();
@@ -38,7 +40,9 @@ pub fn get_language_from_header(accept_language: Option<&str>) -> String {
     "vi".to_string()
 }
 
-pub fn t(key: &str, lang: &str, params: Option<&HashMap<&str, &str>>) -> String {
+/// Dịch message theo key + ngôn ngữ, thay `{placeholder}` từ params.
+#[must_use]
+pub fn t<S: BuildHasher>(key: &str, lang: &str, params: Option<&HashMap<&str, &str, S>>) -> String {
     let template = match lang {
         "en" => translate_en(key),
         _ => translate_vi(key),
@@ -137,17 +141,17 @@ mod tests {
 
     #[test]
     fn test_translation_en() {
-        assert_eq!(t("SUCCESS", "en", None), "Success");
+        assert_eq!(t("SUCCESS", "en", None::<&HashMap<&str, &str>>), "Success");
     }
 
     #[test]
     fn test_translation_vi() {
-        assert_eq!(t("SUCCESS", "vi", None), "Thành công");
+        assert_eq!(t("SUCCESS", "vi", None::<&HashMap<&str, &str>>), "Thành công");
     }
 
     #[test]
     fn test_translation_missing_key() {
-        assert_eq!(t("MISSING_KEY", "en", None), "INTERNAL_SERVER_ERROR");
+        assert_eq!(t("MISSING_KEY", "en", None::<&HashMap<&str, &str>>), "INTERNAL_SERVER_ERROR");
     }
 
     #[test]

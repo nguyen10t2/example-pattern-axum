@@ -95,7 +95,7 @@ mod tests {
 
         let invalid_req = SignUpRequest {
             email: "invalid-email".to_string(),
-            full_name: "".to_string(),
+            full_name: String::new(),
             password: "123".to_string(),
             otp: "12".to_string(),
         };

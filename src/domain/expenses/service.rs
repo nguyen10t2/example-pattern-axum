@@ -30,10 +30,17 @@ pub struct ExpenseService<ER: ExpenseRepository, GR: GroupRepository> {
 }
 
 impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
-    pub fn new(expense_repo: ER, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
+    /// Ghép repo expense/group, cache và pool thành service.
+    pub const fn new(expense_repo: ER, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
         Self { expense_repo, group_repo, cache, pool }
     }
 
+    /// Tạo expense + shares trong 1 transaction, xóa cache summary nhóm.
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember`/`PayerNotInGroup`/`UserNotInGroup` khi sai thành viên,
+    /// lỗi strategy khi split không hợp lệ, lỗi DB khi ghi.
     pub async fn create(&self, data: CreateExpenseRequest, created_by_id: Uuid) -> Result<ExpenseResponse, AppError> {
         // 1. Authorization & Strategy Validation
         self.validate_creation(&data, created_by_id).await?;
@@ -84,6 +91,11 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         Ok(ExpenseMapper::to_response_from_entity(&expense, None, Some(share_responses)))
     }
 
+    /// Kiểm tra quyền + tính hợp lệ của split trước khi tạo expense.
+    ///
+    /// # Errors
+    ///
+    /// Trả lỗi membership hoặc lỗi strategy khi split sai.
     async fn validate_creation(&self, data: &CreateExpenseRequest, created_by_id: Uuid) -> Result<(), AppError> {
         let members = self.group_repo.find_members(&self.pool, data.group_id).await?;
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
@@ -122,6 +134,11 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         Ok(())
     }
 
+    /// Lấy expense kèm shares; nếu có user thì check membership song song.
+    ///
+    /// # Errors
+    ///
+    /// Trả `ExpenseNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm.
     pub async fn find_by_id(&self, id: Uuid, current_user_id: Option<Uuid>) -> Result<ExpenseResponse, AppError> {
         let expense = self.expense_repo.find_by_id(&self.pool, id).await?;
         let expense = expense.ok_or(AppError::Business(BusinessError::ExpenseNotFound))?;
@@ -139,6 +156,11 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         Ok(ExpenseMapper::to_response_with_payer(&expense, Some(share_responses)))
     }
 
+    /// Liệt kê expense của nhóm có phân trang (phải là thành viên).
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi ngoài nhóm.
     pub async fn find_by_group(
         &self,
         group_id: Uuid,
@@ -157,6 +179,12 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         Ok(PaginatedResponse::new(response_items, total, pagination.page(), limit))
     }
 
+    /// Xóa mềm expense (người tạo hoặc admin), xóa cache summary nhóm.
+    ///
+    /// # Errors
+    ///
+    /// Trả `ExpenseNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm,
+    /// `DeletePermissionDenied` khi không có quyền.
     pub async fn delete_expense(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
         let expense = self.expense_repo.find_by_id(&self.pool, id).await?;
         let expense = expense.ok_or(AppError::Business(BusinessError::ExpenseNotFound))?;
@@ -179,6 +207,11 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         Ok(())
     }
 
+    /// Chặn nếu user không phải thành viên nhóm của expense.
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi user ngoài nhóm.
     async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
         if !members.iter().any(|m| m.user_id == user_id) {
