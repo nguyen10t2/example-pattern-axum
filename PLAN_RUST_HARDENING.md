@@ -37,26 +37,32 @@ Lessons (do not repeat):
 
 ## Phase 2 — Enforce pedantic + nursery, fix mechanical lints
 
-Branch: `phase2-pedantic-nursery` (from `master`).
+Branch: `phase2-pedantic-nursery` (stacked on Phase 1 commit `0a578db` to avoid
+re-doing Phase-1 fixes with `clippy --fix`). Status: **DONE — merged into
+`fix-hardening-plan` as `bb8753a` (code commit `1dc2d09`).**
 
-- [ ] Add `[lints.clippy] pedantic = "warn", nursery = "warn"` to `Cargo.toml`
-      (plus `missing_errors_doc`, `missing_panics_doc` if desired) so CI locks the level.
-- [ ] Run `cargo clippy --fix`, review the diff hunk by hunk. Expected bulk:
-  - `#[must_use]` ×36 (methods + functions).
-  - `const fn` candidates ×21 (config builders and pure helpers).
-  - Cast lints (`usize↔i64`, `u64→i64` e.g. `REFRESH_TOKEN_EXPIRATION as i64`,
-    `count as i64` in `strategy.rs`): prefer `cast_signed()` / `From` where genuinely
-    infallible; keep `as` only with a comment proving the range.
-  - `Self` repetition ×6, digit separators (`604_800`) ×2, doc backticks ×1.
-- [ ] Scope `MutexGuard` temporaries in `tests/common/mod.rs` ×5
-      (`significant_drop_tightening` — also satisfies "no lock across `.await`").
+- [x] `[lints.clippy] pedantic + nursery = "warn"` in `Cargo.toml` — plain
+      `cargo clippy` now enforces the level.
+- [x] `clippy --fix` reviewed hunk by hunk: `#[must_use]` hàng loạt, `const fn`
+      cho builders/constructors/mappers, `Self::`, `i64::from`, backticks.
+- [x] Casts: `cast_signed()` cho `u64→i64`, `try_from` + `map_err`/`unwrap_or_default`
+      (không `unwrap` production), ceil float → `(total-1)/limit+1` chính xác tuyệt đối.
+- [x] Scope `MutexGuard` trong test fakes (block + `drop`显式), `i18n::t` generic
+      `BuildHasher`, drop bound `Serialize` thừa, `std::future::ready` cho MemoryCache,
+      `604800` → const.
 
-Acceptance: `cargo clippy --all-targets -- -W clippy::pedantic -W clippy::nursery`
-0 warnings, `cargo test` green.
+Acceptance: `cargo fmt --check`, `cargo clippy --all-targets` chỉ còn 2 nhóm thuộc
+Phase 3 (`missing_errors_doc`, `unused_async`), `cargo test` green.
+
+Lessons:
+- `div_ceil` trên `i64` vẫn unstable (chỉ bản unsigned stable) — dùng công thức nguyên.
+- `fn` không có default type param trên stable — xem Phase 1 lessons.
+- Sync-impl-of-async-trait: `std::future::ready` thoát cả `unused_async_trait_impl`
+  lẫn `manual_async_fn`, zero-alloc (xem quyết định đã chốt ở cuối file).
 
 ## Phase 3 — Documentation coverage
 
-Branch: `phase3-docs` (from `master`).
+Branch: `phase3-docs` (stack on Phase 2 tip to avoid conflicts).
 
 Docs style (quy tắc chốt): **tiếng Việt, ngắn gọn 1–2 dòng, đủ hiểu** — không verbose.
 Chỉ docs ở pub fn chuẩn (public API: handlers, services, repos, config, utils dùng chung);
