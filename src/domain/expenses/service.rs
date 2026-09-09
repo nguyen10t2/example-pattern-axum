@@ -14,7 +14,10 @@ use crate::{
             response::ExpenseResponse,
             strategy::{SplitContext, SplitShareInput, SplitStrategyFactory},
         },
-        groups::repository::GroupRepository,
+        groups::{
+            membership::{self, member_entries},
+            repository::GroupRepository,
+        },
         shared::{PaginatedResponse, PaginationQuery},
     },
     errors::{AppError, BusinessError},
@@ -97,7 +100,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
     ///
     /// Trả lỗi membership hoặc lỗi strategy khi split sai.
     async fn validate_creation(&self, data: &CreateExpenseRequest, created_by_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(&self.pool, data.group_id).await?;
+        let members = member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id).await?;
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
         if !member_ids.contains(&created_by_id) {
@@ -189,7 +192,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         let expense = self.expense_repo.find_by_id(&self.pool, id).await?;
         let expense = expense.ok_or(AppError::Business(BusinessError::ExpenseNotFound))?;
 
-        let members = self.group_repo.find_members(&self.pool, expense.group_id).await?;
+        let members = member_entries(&self.cache, &self.pool, &self.group_repo, expense.group_id).await?;
         let member = members.iter().find(|m| m.user_id == current_user_id);
 
         let Some(member) = member else {
@@ -213,10 +216,6 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
     ///
     /// Trả `NotGroupMember` khi user ngoài nhóm.
     async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
-        let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        if !members.iter().any(|m| m.user_id == user_id) {
-            return Err(AppError::Business(BusinessError::NotGroupMember));
-        }
-        Ok(())
+        membership::ensure_membership(&self.cache, &self.pool, &self.group_repo, group_id, user_id).await
     }
 }

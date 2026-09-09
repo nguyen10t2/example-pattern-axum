@@ -225,12 +225,10 @@ impl<R: UserRepository> UserService<R> {
             let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
             let updated_sessions: Vec<String> = active_sessions.into_iter().filter(|jti| jti != &claims.jti).collect();
 
-            self.cache.delete(&refresh_key).await;
-            self.cache.delete(&user_key).await;
-
             if updated_sessions.is_empty() {
-                self.cache.delete(&session_key).await;
+                self.cache.delete_many(&[refresh_key, user_key, session_key]).await;
             } else {
+                self.cache.delete_many(&[refresh_key, user_key]).await;
                 self.cache.set(&session_key, &updated_sessions, REFRESH_TOKEN_EXPIRATION).await;
             }
         }
@@ -377,11 +375,9 @@ impl<R: UserRepository> UserService<R> {
         let session_key = format!("sessions:{user_id}");
         let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
 
-        self.cache.delete(&format!("user:{user_id}")).await;
-        self.cache.delete(&session_key).await;
-        for jti in active_sessions {
-            self.cache.delete(&format!("refreshToken:{jti}")).await;
-        }
+        let mut gone = vec![format!("user:{user_id}"), session_key];
+        gone.extend(active_sessions.into_iter().map(|jti| format!("refreshToken:{jti}")));
+        self.cache.delete_many(&gone).await;
 
         info!(user_id = %user_id, "User changed password");
         Ok(())
@@ -433,12 +429,9 @@ impl<R: UserRepository> UserService<R> {
         let session_key = format!("sessions:{}", user.id);
         let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
 
-        self.cache.delete(&key).await;
-        self.cache.delete(&format!("user:{}", user.id)).await;
-        self.cache.delete(&session_key).await;
-        for jti in active_sessions {
-            self.cache.delete(&format!("refreshToken:{jti}")).await;
-        }
+        let mut gone = vec![key, format!("user:{}", user.id), session_key];
+        gone.extend(active_sessions.into_iter().map(|jti| format!("refreshToken:{jti}")));
+        self.cache.delete_many(&gone).await;
 
         info!(user_id = %user.id, "User reset password");
         Ok(())
@@ -459,13 +452,11 @@ impl<R: UserRepository> UserService<R> {
 
         let mut active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
         active_sessions.push(jti);
-
         if active_sessions.len() > MAX_SESSIONS_PER_USER {
             let drain_count = active_sessions.len() - MAX_SESSIONS_PER_USER;
-            let oldest_sessions: Vec<String> = active_sessions.drain(0..drain_count).collect();
-            for old_jti in oldest_sessions {
-                self.cache.delete(&format!("refreshToken:{old_jti}")).await;
-            }
+            let gone: Vec<String> =
+                active_sessions.drain(0..drain_count).map(|old_jti| format!("refreshToken:{old_jti}")).collect();
+            self.cache.delete_many(&gone).await;
         }
 
         self.cache.set(&key, &user_id.to_string(), REFRESH_TOKEN_EXPIRATION).await;
