@@ -428,6 +428,10 @@ impl RedisConfig {
     /// # Errors
     ///
     /// Trả `RedisConnectError` khi URL sai, timeout hoặc không kết nối được.
+    #[tracing::instrument(skip(self), fields(
+        connection_timeout_secs = self.connection_timeout.as_secs(),
+        response_timeout_secs = self.response_timeout.as_secs(),
+    ))]
     pub async fn connect(&self) -> Result<redis::aio::ConnectionManager, RedisConnectError> {
         tracing::debug!(
             "connecting to redis (connection_timeout={}s, response_timeout={}s)",

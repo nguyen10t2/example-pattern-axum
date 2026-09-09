@@ -16,6 +16,7 @@ impl RedisRateLimiter {
 
     /// Increments key in Redis and sets expiration on initial hit.
     /// Returns `true` if under or equal to `max_requests`, `false` otherwise.
+    #[tracing::instrument(skip(self))]
     pub async fn check_rate_limit(&self, key: &str, max_requests: u32, duration: Duration) -> bool {
         let mut conn = self.manager.clone();
         let count_res: Result<i64, redis::RedisError> = conn.incr(key, 1).await;

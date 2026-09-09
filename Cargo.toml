@@ -39,6 +39,18 @@ redis = { version = "0.29.5", features = ["tokio-comp", "connection-manager"] }
 time = "0.3"
 dashmap = "6.1"
 
+[dev-dependencies]
+# Chỉ đo console stats (không plots) để build nhanh; đủ cho baseline so sánh.
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "debt_engine"
+harness = false
+
+[[bench]]
+name = "split_validation"
+harness = false
+
 [lints.clippy]
 pedantic = "warn"
 nursery = "warn"
