@@ -14,19 +14,19 @@ use crate::{
         shared::{PaginatedResponse, PaginationQuery},
     },
     errors::{AppError, BusinessError},
-    utils::cache::CacheStore,
+    utils::cache::{Cache, CacheStore},
 };
 use sqlx::PgPool;
 
 pub struct SettlementService<SR: SettlementRepository, GR: GroupRepository> {
     settlement_repo: SR,
     group_repo: GR,
-    cache: Arc<dyn CacheStore>,
+    cache: Arc<Cache>,
     pool: PgPool,
 }
 
 impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
-    pub fn new(settlement_repo: SR, group_repo: GR, cache: Arc<dyn CacheStore>, pool: PgPool) -> Self {
+    pub fn new(settlement_repo: SR, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
         Self { settlement_repo, group_repo, cache, pool }
     }
 

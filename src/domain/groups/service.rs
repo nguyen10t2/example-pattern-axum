@@ -22,7 +22,7 @@ use crate::{
     },
     errors::{AppError, BusinessError, map_unique_violation},
     utils::{
-        cache::{CACHE_EXPIRATION, CacheStore, CacheStoreExt},
+        cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt},
         random::generate_invite_code,
     },
 };
@@ -33,7 +33,7 @@ pub struct GroupService<GR: GroupRepository, ER: ExpenseRepository, SR: Settleme
     expense_repo: ER,
     settlement_repo: SR,
     user_repo: UR,
-    cache: Arc<dyn CacheStore>,
+    cache: Arc<Cache>,
     pool: PgPool,
 }
 
@@ -45,7 +45,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         expense_repo: ER,
         settlement_repo: SR,
         user_repo: UR,
-        cache: Arc<dyn CacheStore>,
+        cache: Arc<Cache>,
         pool: PgPool,
     ) -> Self {
         Self { group_repo, expense_repo, settlement_repo, user_repo, cache, pool }
