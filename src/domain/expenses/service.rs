@@ -91,7 +91,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
 
         let share_responses = shares.into_iter().map(|s| ExpenseMapper::to_share_response(&s, None)).collect();
 
-        Ok(ExpenseMapper::to_response_from_entity(&expense, None, Some(share_responses)))
+        Ok(ExpenseMapper::to_response_from_entity(expense, None, Some(share_responses)))
     }
 
     /// Kiểm tra quyền + tính hợp lệ của split trước khi tạo expense.
@@ -154,9 +154,9 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
             ((), self.expense_repo.find_shares_by_expense(&self.pool, id).await?)
         };
 
-        let share_responses = shares.iter().map(ExpenseMapper::to_share_response_with_user).collect();
+        let share_responses = shares.into_iter().map(ExpenseMapper::to_share_response_with_user).collect();
 
-        Ok(ExpenseMapper::to_response_with_payer(&expense, Some(share_responses)))
+        Ok(ExpenseMapper::to_response_with_payer(expense, Some(share_responses)))
     }
 
     /// Liệt kê expense của nhóm có phân trang (phải là thành viên).
@@ -177,7 +177,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
             self.expense_repo.find_by_group(&self.pool, group_id, limit, offset).await.map_err(AppError::from)
         },)?;
 
-        let response_items = items.iter().map(|e| ExpenseMapper::to_response_with_payer(e, None)).collect();
+        let response_items = items.into_iter().map(|e| ExpenseMapper::to_response_with_payer(e, None)).collect();
 
         Ok(PaginatedResponse::new(response_items, total, pagination.page(), limit))
     }

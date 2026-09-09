@@ -114,7 +114,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
                 .map_err(AppError::from)
         },)?;
 
-        let response_items = SettlementMapper::to_response_list_with_users(&items);
+        let response_items = SettlementMapper::to_response_list_with_users(items);
 
         Ok(PaginatedResponse::new(response_items, total, pagination.page(), limit))
     }

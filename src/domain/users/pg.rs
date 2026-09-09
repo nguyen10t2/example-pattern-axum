@@ -24,10 +24,14 @@ impl UserRepository for PostgresUserRepository {
         executor: E,
         id: Uuid,
     ) -> Result<Option<UserEntity>, sqlx::Error> {
-        sqlx::query_as::<Postgres, UserEntity>("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(executor)
-            .await
+        sqlx::query_as::<Postgres, UserEntity>(
+            "SELECT id, full_name, email, email_verified, password_hash, google_id, avatar_url, phone,
+                    phone_verified, preferred_currency, is_active, deleted_at, created_at, updated_at
+             FROM users WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(executor)
+        .await
     }
 
     async fn find_by_email<'e, E: Executor<'e, Database = Postgres> + Send>(
@@ -36,7 +40,9 @@ impl UserRepository for PostgresUserRepository {
         email: &str,
     ) -> Result<Option<UserEntity>, sqlx::Error> {
         sqlx::query_as::<Postgres, UserEntity>(
-            "SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
+            "SELECT id, full_name, email, email_verified, password_hash, google_id, avatar_url, phone,
+                    phone_verified, preferred_currency, is_active, deleted_at, created_at, updated_at
+             FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL",
         )
         .bind(email)
         .fetch_optional(executor)
@@ -48,10 +54,14 @@ impl UserRepository for PostgresUserRepository {
         executor: E,
         google_id: &str,
     ) -> Result<Option<UserEntity>, sqlx::Error> {
-        sqlx::query_as::<Postgres, UserEntity>("SELECT * FROM users WHERE google_id = $1 AND deleted_at IS NULL")
-            .bind(google_id)
-            .fetch_optional(executor)
-            .await
+        sqlx::query_as::<Postgres, UserEntity>(
+            "SELECT id, full_name, email, email_verified, password_hash, google_id, avatar_url, phone,
+                    phone_verified, preferred_currency, is_active, deleted_at, created_at, updated_at
+             FROM users WHERE google_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(google_id)
+        .fetch_optional(executor)
+        .await
     }
 
     async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(

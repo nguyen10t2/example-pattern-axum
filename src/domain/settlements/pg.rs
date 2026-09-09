@@ -47,10 +47,14 @@ impl SettlementRepository for PostgresSettlementRepository {
         executor: E,
         id: Uuid,
     ) -> Result<Option<SettlementEntity>, sqlx::Error> {
-        sqlx::query_as::<Postgres, SettlementEntity>("SELECT * FROM settlements WHERE id = $1 AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(executor)
-            .await
+        sqlx::query_as::<Postgres, SettlementEntity>(
+            "SELECT id, group_id, sender_id, receiver_id, amount, currency, settled_at,
+                    deleted_at, created_at, updated_at
+             FROM settlements WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(executor)
+        .await
     }
 
     async fn find_by_group<'e, E: Executor<'e, Database = Postgres> + Copy + Send>(
@@ -59,7 +63,9 @@ impl SettlementRepository for PostgresSettlementRepository {
         group_id: Uuid,
     ) -> Result<Vec<SettlementEntity>, sqlx::Error> {
         sqlx::query_as::<Postgres, SettlementEntity>(
-            "SELECT * FROM settlements WHERE group_id = $1 AND deleted_at IS NULL",
+            "SELECT id, group_id, sender_id, receiver_id, amount, currency, settled_at,
+                    deleted_at, created_at, updated_at
+             FROM settlements WHERE group_id = $1 AND deleted_at IS NULL",
         )
         .bind(group_id)
         .fetch_all(executor)
