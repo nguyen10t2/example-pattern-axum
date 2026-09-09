@@ -109,7 +109,7 @@ impl<R: UserRepository> UserService<R> {
         self.cache.delete(&key).await;
 
         info!(email = %created_user.email, user_id = %created_user.id, "User signed up");
-        Ok(UserMapper::to_response(&created_user))
+        Ok(UserMapper::to_response(created_user))
     }
 
     /// Đăng nhập email/password, trả cặp access + refresh token.
@@ -292,7 +292,7 @@ impl<R: UserRepository> UserService<R> {
         let user = self.repo.find_by_id(&self.pool, id).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(id.to_string())))?;
 
-        let response = UserMapper::to_response(&user);
+        let response = UserMapper::to_response(user);
         self.cache.set(&key, &response, CACHE_EXPIRATION).await;
 
         Ok(response)
@@ -306,7 +306,7 @@ impl<R: UserRepository> UserService<R> {
     pub async fn find_by_email(&self, email: &str) -> Result<UserResponse, AppError> {
         let user = self.repo.find_by_email(&self.pool, email).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(email.to_string())))?;
-        Ok(UserMapper::to_response(&user))
+        Ok(UserMapper::to_response(user))
     }
 
     /// Cập nhật profile rồi refresh cache user.
@@ -324,7 +324,7 @@ impl<R: UserRepository> UserService<R> {
         };
 
         let updated_user = self.repo.update(&self.pool, id, &update_entity).await?;
-        let response = UserMapper::to_response(&updated_user);
+        let response = UserMapper::to_response(updated_user);
 
         let key = format!("user:{id}");
         self.cache.set(&key, &response, CACHE_EXPIRATION).await;

@@ -1,4 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
+use hashbrown::HashMap;
+use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -82,7 +83,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         tx.commit().await?;
 
         info!(group_id = %group.id, name = %group.name, creator_id = %creator_id, "Group created");
-        Ok(GroupMapper::to_response(&group))
+        Ok(GroupMapper::to_response(group))
     }
 
     /// Cho user vào nhóm bằng invite code (đã vào rồi thì bỏ qua, vẫn `Ok`).
@@ -116,7 +117,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             }
         }
 
-        Ok(GroupMapper::to_response(&group))
+        Ok(GroupMapper::to_response(group))
     }
 
     /// Liệt kê các nhóm mà user tham gia.
@@ -126,7 +127,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     /// Trả lỗi DB khi đọc thất bại.
     pub async fn find_all_by_user(&self, user_id: Uuid) -> Result<Vec<GroupResponse>, AppError> {
         let groups = self.group_repo.find_all_by_user(&self.pool, user_id).await?;
-        Ok(groups.iter().map(GroupMapper::to_response_with_balance).collect())
+        Ok(groups.into_iter().map(GroupMapper::to_response_with_balance).collect())
     }
 
     /// Lấy nhóm theo id; nếu có `current_user_id` thì check membership song song.
@@ -145,7 +146,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         };
         let group = group_opt.ok_or(AppError::Business(BusinessError::GroupNotFound))?;
 
-        Ok(GroupMapper::to_response(&group))
+        Ok(GroupMapper::to_response(group))
     }
 
     /// Tổng hợp nhóm: số dư từng thành viên + gợi ý trả nợ, cache 1 phút.
@@ -292,7 +293,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     ) -> Result<Vec<GroupMemberResponse>, AppError> {
         self.ensure_membership(group_id, current_user_id).await?;
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
-        Ok(members.iter().map(GroupMapper::to_member_response).collect())
+        Ok(members.into_iter().map(GroupMapper::to_member_response).collect())
     }
 
     /// Lấy danh sách thành viên kèm user (dùng nội bộ service).

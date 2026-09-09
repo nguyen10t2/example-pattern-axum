@@ -9,7 +9,7 @@ impl ExpenseMapper {
     #[must_use]
     /// Map expense kèm payer sang response.
     pub fn to_response_with_payer(
-        entity: &ExpenseWithPayer,
+        entity: ExpenseWithPayer,
         shares: Option<Vec<ExpenseShareResponse>>,
     ) -> ExpenseResponse {
         ExpenseResponse {
@@ -17,10 +17,10 @@ impl ExpenseMapper {
             group_id: entity.group_id,
             created_by_id: entity.created_by_id,
             payer_id: entity.payer_id,
-            payer_name: Some(entity.payer_name.clone()),
+            payer_name: Some(entity.payer_name),
             amount: entity.amount,
             currency: entity.currency,
-            description: entity.description.clone(),
+            description: entity.description,
             split_type: entity.split_type,
             expense_date: entity.expense_date,
             created_at: entity.created_at,
@@ -32,7 +32,7 @@ impl ExpenseMapper {
     #[must_use]
     /// Map expense entity sang response (tên payer và shares truyền rời).
     pub fn to_response_from_entity(
-        entity: &ExpenseEntity,
+        entity: ExpenseEntity,
         payer_name: Option<String>,
         shares: Option<Vec<ExpenseShareResponse>>,
     ) -> ExpenseResponse {
@@ -44,7 +44,7 @@ impl ExpenseMapper {
             payer_name,
             amount: entity.amount,
             currency: entity.currency,
-            description: entity.description.clone(),
+            description: entity.description,
             split_type: entity.split_type,
             expense_date: entity.expense_date,
             created_at: entity.created_at,
@@ -70,12 +70,12 @@ impl ExpenseMapper {
 
     #[must_use]
     /// Map share kèm user sang response.
-    pub fn to_share_response_with_user(entity: &ExpenseShareWithUser) -> ExpenseShareResponse {
+    pub fn to_share_response_with_user(entity: ExpenseShareWithUser) -> ExpenseShareResponse {
         ExpenseShareResponse {
             id: entity.id,
             expense_id: entity.expense_id,
             user_id: entity.user_id,
-            user_name: Some(entity.user_name.clone()),
+            user_name: Some(entity.user_name),
             share_amount: entity.share_amount,
             share_percentage: entity.share_percentage,
             created_at: entity.created_at,
