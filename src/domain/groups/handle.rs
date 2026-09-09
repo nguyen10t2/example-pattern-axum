@@ -21,6 +21,7 @@ use crate::{
     state::AppState,
 };
 
+/// Dựng routes nhóm (tất cả sau auth).
 pub fn group_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/", get(handle_get_all_groups).post(handle_create_group))
@@ -31,6 +32,11 @@ pub fn group_router(state: AppState) -> Router<AppState> {
         .route_layer(axum::middleware::from_fn_with_state(state, crate::middleware::require_auth))
 }
 
+/// Liệt kê các nhóm của chính mình.
+///
+/// # Errors
+///
+/// Trả lỗi DB khi đọc thất bại.
 pub async fn handle_get_all_groups(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -39,6 +45,11 @@ pub async fn handle_get_all_groups(
     Ok(SuccessResponse::with_message(groups, "Groups retrieved successfully"))
 }
 
+/// Tạo nhóm mới, trả `201 Created` (giới hạn theo user và IP).
+///
+/// # Errors
+///
+/// Trả `TooManyRequests` khi vượt rate-limit.
 pub async fn handle_create_group(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -65,6 +76,11 @@ pub async fn handle_create_group(
     Ok(SuccessResponse::created(group, "Group created successfully"))
 }
 
+/// Vào nhóm bằng invite code (giới hạn theo user và IP).
+///
+/// # Errors
+///
+/// Trả `TooManyRequests` khi vượt rate-limit, `InvalidInviteCode` khi code sai.
 pub async fn handle_join_group(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -91,6 +107,11 @@ pub async fn handle_join_group(
     Ok(SuccessResponse::with_message(group, "Joined group successfully"))
 }
 
+/// Lấy chi tiết nhóm (phải là thành viên).
+///
+/// # Errors
+///
+/// Trả `NotGroupMember` khi ngoài nhóm, `GroupNotFound` khi nhóm không tồn tại.
 pub async fn handle_get_group_by_id(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -100,6 +121,11 @@ pub async fn handle_get_group_by_id(
     Ok(SuccessResponse::with_message(group, "Group found successfully"))
 }
 
+/// Lấy tổng hợp nhóm: số dư + gợi ý trả nợ.
+///
+/// # Errors
+///
+/// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_group_summary(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -109,6 +135,11 @@ pub async fn handle_get_group_summary(
     Ok(SuccessResponse::with_message(summary, "Group summary retrieved successfully"))
 }
 
+/// Thêm thành viên vào nhóm (chỉ admin), trả `201 Created`.
+///
+/// # Errors
+///
+/// Trả `AdminRequired` khi không phải admin, `Conflict` khi đã trong nhóm.
 pub async fn handle_add_group_member(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -119,6 +150,11 @@ pub async fn handle_add_group_member(
     Ok(SuccessResponse::created(member, "Member added successfully"))
 }
 
+/// Liệt kê thành viên nhóm.
+///
+/// # Errors
+///
+/// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_group_members(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -128,6 +164,11 @@ pub async fn handle_get_group_members(
     Ok(SuccessResponse::with_message(members, "Members retrieved successfully"))
 }
 
+/// Xóa nhóm (chỉ admin).
+///
+/// # Errors
+///
+/// Trả `AdminRequired` khi không phải admin, `GroupNotFound` khi nhóm không tồn tại.
 pub async fn handle_delete_group(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,

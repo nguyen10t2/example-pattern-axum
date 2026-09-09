@@ -6,7 +6,7 @@ pub mod constants;
 // Argon2Config + Builder
 // ---------------------------------------------------------------------------
 
-/// Configuration for Argon2 password hashing.
+/// Cấu hình băm password Argon2.
 #[derive(Debug, Clone)]
 pub struct Argon2Config {
     pub memory_cost: u32,
@@ -15,10 +15,7 @@ pub struct Argon2Config {
     pub output_len: usize,
 }
 
-/// Builder for [`Argon2Config`].
-///
-/// All fields default to the recommended Argon2id parameters so you can
-/// call `Argon2ConfigBuilder::new().build()` and get a sensible config.
+/// Builder cho [`Argon2Config`], mặc định là tham số Argon2id khuyến nghị.
 #[derive(Debug, Clone)]
 pub struct Argon2ConfigBuilder {
     memory_cost: u32,
@@ -39,42 +36,41 @@ impl Default for Argon2ConfigBuilder {
 }
 
 impl Argon2ConfigBuilder {
-    /// Creates a new builder with default Argon2id parameters.
+    /// Tạo builder với tham số Argon2id mặc định.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the memory cost (in KiB). Default: `Params::DEFAULT_M_COST` (19456 KiB ≈ 19 MiB).
+    /// Chi phí memory (KiB). Mặc định: ~19 MiB.
     #[must_use]
     pub const fn memory_cost(mut self, cost: u32) -> Self {
         self.memory_cost = cost;
         self
     }
 
-    /// Sets the time cost (number of iterations). Default: `Params::DEFAULT_T_COST` (2).
+    /// Số vòng lặp. Mặc định: 2.
     #[must_use]
     pub const fn time_cost(mut self, cost: u32) -> Self {
         self.time_cost = cost;
         self
     }
 
-    /// Sets the parallelism (number of threads). Default: `Params::DEFAULT_P_COST` (1).
+    /// Số luồng song song. Mặc định: 1.
     #[must_use]
     pub const fn parallelism(mut self, p: u32) -> Self {
         self.parallelism = p;
         self
     }
 
-    /// Sets the output length in bytes. Default: 32.
+    /// Độ dài output (bytes). Mặc định: 32.
     #[must_use]
     pub const fn output_len(mut self, len: usize) -> Self {
         self.output_len = len;
         self
     }
 
-    /// Populates fields from environment variables, falling back to the
-    /// current builder values (which are the defaults unless overridden).
+    /// Nạp từ biến môi trường, fallback về giá trị hiện tại.
     ///
     /// # Environment Variables
     ///
@@ -94,7 +90,7 @@ impl Argon2ConfigBuilder {
         }
     }
 
-    /// Consumes the builder and returns an [`Argon2Config`].
+    /// Build ra [`Argon2Config`].
     #[must_use]
     pub const fn build(self) -> Argon2Config {
         Argon2Config {
@@ -107,23 +103,23 @@ impl Argon2ConfigBuilder {
 }
 
 impl Argon2Config {
-    /// Returns a builder pre-populated from environment variables.
+    /// Trả builder đã nạp từ env.
     #[must_use]
     pub fn builder() -> Argon2ConfigBuilder {
         Argon2ConfigBuilder::new()
     }
 
-    /// Convenience shortcut: `Argon2ConfigBuilder::new().from_env().build()`.
+    /// Shortcut: `Argon2ConfigBuilder::new().from_env().build()`.
     #[must_use]
     pub fn from_env() -> Self {
         Self::builder().from_env().build()
     }
 
-    /// Builds the `Argon2` hasher from this configuration.
+    /// Dựng hasher `Argon2` từ cấu hình.
     ///
     /// # Errors
     ///
-    /// Returns an error if the parameters are invalid for Argon2.
+    /// Trả lỗi khi tham số không hợp lệ với Argon2.
     pub fn build_argon2(&self) -> Result<Argon2<'static>, argon2::Error> {
         let params = Params::new(self.memory_cost, self.time_cost, self.parallelism, Some(self.output_len))?;
         Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
@@ -134,7 +130,7 @@ impl Argon2Config {
 // DatabaseConfig + Builder
 // ---------------------------------------------------------------------------
 
-/// Configuration for the `PostgreSQL` connection pool.
+/// Cấu hình pool `PostgreSQL`.
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub database_url: String,
@@ -144,12 +140,7 @@ pub struct DatabaseConfig {
     pub acquire_timeout: std::time::Duration,
 }
 
-/// Builder for [`DatabaseConfig`].
-///
-/// # Required
-///
-/// - `database_url` — must be set via [`DatabaseConfigBuilder::database_url`]
-///   or [`DatabaseConfigBuilder::from_env`] before calling [`build`](DatabaseConfigBuilder::build).
+/// Builder cho [`DatabaseConfig`]. Bắt buộc `database_url`; còn lại xem bảng mặc định.
 ///
 /// # Defaults
 ///
@@ -181,52 +172,49 @@ impl Default for DatabaseConfigBuilder {
 }
 
 impl DatabaseConfigBuilder {
-    /// Creates a new builder with default values.
+    /// Tạo builder với giá trị mặc định.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the PostgreSQL connection URL. **Required.**
+    /// URL Postgres. **Bắt buộc.**
     #[must_use]
     pub fn database_url(mut self, url: impl Into<String>) -> Self {
         self.database_url = Some(url.into());
         self
     }
 
-    /// Sets the maximum number of connections in the pool. Default: 5.
+    /// Số connection tối đa. Mặc định: 5.
     #[must_use]
     pub const fn max_connections(mut self, n: u32) -> Self {
         self.max_connections = n;
         self
     }
 
-    /// Sets the minimum number of idle connections. Default: 1.
+    /// Số connection idle tối thiểu. Mặc định: 1.
     #[must_use]
     pub const fn min_connections(mut self, n: u32) -> Self {
         self.min_connections = n;
         self
     }
 
-    /// Sets the slow-acquire warning threshold. Default: 2 seconds.
+    /// Ngưỡng cảnh báo acquire chậm. Mặc định: 2 giây.
     #[must_use]
     pub const fn acquire_slow_threshold(mut self, d: std::time::Duration) -> Self {
         self.acquire_slow_threshold = d;
         self
     }
 
-    /// Sets the maximum time [`sqlx::Pool::acquire`] will wait for a connection
-    /// before returning an error. This also bounds how long the pool waits while
-    /// trying to open a new connection to an unreachable database, so the server
-    /// fails fast instead of hanging forever. Default: 10 seconds.
+    /// Thời gian chờ `acquire` tối đa — DB unreachable thì fail nhanh thay vì treo.
+    /// Mặc định: 10 giây.
     #[must_use]
     pub const fn acquire_timeout(mut self, d: std::time::Duration) -> Self {
         self.acquire_timeout = d;
         self
     }
 
-    /// Populates fields from environment variables, falling back to the
-    /// current builder values.
+    /// Nạp từ biến môi trường, fallback về giá trị hiện tại.
     ///
     /// # Environment Variables
     ///
@@ -254,11 +242,11 @@ impl DatabaseConfigBuilder {
         }
     }
 
-    /// Consumes the builder and returns a [`DatabaseConfig`].
+    /// Build ra [`DatabaseConfig`].
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::MissingDatabaseUrl`] if `database_url` was never set.
+    /// Trả [`ConfigError::MissingDatabaseUrl`] khi chưa set `database_url`.
     pub fn build(self) -> Result<DatabaseConfig, ConfigError> {
         let database_url = self.database_url.ok_or(ConfigError::MissingDatabaseUrl)?;
         Ok(DatabaseConfig {
@@ -272,30 +260,26 @@ impl DatabaseConfigBuilder {
 }
 
 impl DatabaseConfig {
-    /// Returns a new builder.
+    /// Tạo builder mới.
     #[must_use]
     pub fn builder() -> DatabaseConfigBuilder {
         DatabaseConfigBuilder::new()
     }
 
-    /// Convenience shortcut: reads from env.
+    /// Đọc từ env.
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::MissingDatabaseUrl`] if `DATABASE_URL` is not set.
+    /// Trả [`ConfigError::MissingDatabaseUrl`] khi thiếu `DATABASE_URL`.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::builder().from_env().build()
     }
 
-    /// Creates a new database pool with the configured settings.
+    /// Tạo pool lazy (kết nối thật ở query đầu). `acquire_timeout` chặn treo khi DB unreachable.
     ///
     /// # Errors
     ///
-    /// Returns an error if the database connection cannot be established.
-    ///
-    /// Note: the pool is created lazily. `acquire_timeout` bounds how long the
-    /// pool waits while opening a connection, so an unreachable database surfaces
-    /// as an error instead of hanging the process.
+    /// Trả lỗi khi URL sai.
     pub fn connect_lazy(&self) -> Result<sqlx::PgPool, sqlx::Error> {
         let options = self.database_url.parse::<sqlx::postgres::PgConnectOptions>()?;
 
@@ -307,11 +291,11 @@ impl DatabaseConfig {
             .connect_lazy_with(options))
     }
 
-    /// Runs database migrations using the configured database pool.
+    /// Chạy migrations trên pool đã khởi tạo.
     ///
     /// # Errors
     ///
-    /// Returns an error if migrations fail to run.
+    /// Trả lỗi khi migrate thất bại.
     pub async fn migrate(&self, pool: &sqlx::PgPool) -> Result<(), sqlx::migrate::MigrateError> {
         tracing::debug!(
             "acquiring a database connection for migrations (acquire_timeout={}s)",
@@ -328,7 +312,7 @@ impl DatabaseConfig {
 // RedisConfig + Builder
 // ---------------------------------------------------------------------------
 
-/// Configuration for the `Redis` connection manager.
+/// Cấu hình connection manager `Redis`.
 #[derive(Debug, Clone)]
 pub struct RedisConfig {
     pub url: String,
@@ -336,9 +320,7 @@ pub struct RedisConfig {
     pub response_timeout: std::time::Duration,
 }
 
-/// Builder for [`RedisConfig`].
-///
-/// # Defaults
+/// Builder cho [`RedisConfig`]. Mặc định:
 ///
 /// | Field              | Default                   |
 /// |--------------------|---------------------------|
@@ -363,39 +345,35 @@ impl Default for RedisConfigBuilder {
 }
 
 impl RedisConfigBuilder {
-    /// Creates a new builder with default values.
+    /// Tạo builder với giá trị mặc định.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the Redis connection URL. Default: `redis://127.0.0.1:6379`.
+    /// URL Redis. Mặc định: `redis://127.0.0.1:6379`.
     #[must_use]
     pub fn url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
         self
     }
 
-    /// Sets the per-attempt timeout for establishing a Redis connection.
-    /// This is also used as the overall bound for the initial connect so the
-    /// server fails fast instead of hanging forever. Default: 5 seconds.
+    /// Timeout mỗi lần bắt tay TCP, đồng thời là chặn trên cho lần connect đầu (fail nhanh).
+    /// Mặc định: 5 giây.
     #[must_use]
     pub const fn connection_timeout(mut self, d: std::time::Duration) -> Self {
         self.connection_timeout = d;
         self
     }
 
-    /// Sets the timeout for each Redis command (applied via
-    /// `ConnectionManagerConfig::set_response_timeout`), so a hung Redis
-    /// surfaces as an error instead of hanging request handlers. Default: 2 seconds.
+    /// Timeout mỗi lệnh Redis (treo thì báo lỗi thay vì treo handler). Mặc định: 2 giây.
     #[must_use]
     pub const fn response_timeout(mut self, d: std::time::Duration) -> Self {
         self.response_timeout = d;
         self
     }
 
-    /// Populates fields from environment variables, falling back to the
-    /// current builder values.
+    /// Nạp từ biến môi trường, fallback về giá trị hiện tại.
     ///
     /// # Environment Variables
     ///
@@ -421,7 +399,7 @@ impl RedisConfigBuilder {
         }
     }
 
-    /// Consumes the builder and returns a [`RedisConfig`].
+    /// Build ra [`RedisConfig`].
     #[must_use]
     pub fn build(self) -> RedisConfig {
         RedisConfig {
@@ -433,29 +411,23 @@ impl RedisConfigBuilder {
 }
 
 impl RedisConfig {
-    /// Returns a new builder.
+    /// Tạo builder mới.
     #[must_use]
     pub fn builder() -> RedisConfigBuilder {
         RedisConfigBuilder::new()
     }
 
-    /// Convenience shortcut: `RedisConfigBuilder::new().from_env().build()`.
+    /// Shortcut: `RedisConfigBuilder::new().from_env().build()`.
     #[must_use]
     pub fn from_env() -> Self {
         Self::builder().from_env().build()
     }
 
-    /// Establishes a Redis connection manager with timeouts applied.
-    ///
-    /// The per-attempt TCP timeout and the per-command response timeout are
-    /// taken from this config, and the total initial-connect wait is capped at
-    /// `connection_timeout` so an unreachable Redis fails fast instead of
-    /// hanging startup forever (retries are kept low on purpose).
+    /// Mở connection manager Redis có timeout (fail nhanh khi Redis unreachable).
     ///
     /// # Errors
     ///
-    /// Returns a [`RedisConnectError`] if the URL is invalid, the initial
-    /// connect times out, or the connection cannot be established.
+    /// Trả `RedisConnectError` khi URL sai, timeout hoặc không kết nối được.
     pub async fn connect(&self) -> Result<redis::aio::ConnectionManager, RedisConnectError> {
         tracing::debug!(
             "connecting to redis (connection_timeout={}s, response_timeout={}s)",
@@ -479,7 +451,7 @@ impl RedisConfig {
     }
 }
 
-/// Errors that can occur while establishing a Redis connection via [`RedisConfig::connect`].
+/// Lỗi mở kết nối Redis qua [`RedisConfig::connect`].
 #[derive(Debug, thiserror::Error)]
 pub enum RedisConnectError {
     #[error("invalid redis url: {0}")]

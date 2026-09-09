@@ -83,6 +83,7 @@ pub enum BusinessError {
 }
 
 impl BusinessError {
+    /// Map lỗi nghiệp vụ sang HTTP status.
     #[must_use]
     pub const fn status_code(&self) -> StatusCode {
         match self {
@@ -111,6 +112,7 @@ impl BusinessError {
         }
     }
 
+    /// Map lỗi nghiệp vụ sang mã lỗi trả về client (đồng bộ với i18n).
     #[must_use]
     pub const fn error_code(&self) -> &str {
         match self {

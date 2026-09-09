@@ -17,7 +17,8 @@ pub fn generate_invite_code() -> String {
 }
 
 mod hex {
-    pub fn encode(data: [u8; 4]) -> String {
+    /// Encode 4 bytes thành hex lowercase.
+    pub(super) fn encode(data: [u8; 4]) -> String {
         format!("{:02x}{:02x}{:02x}{:02x}", data[0], data[1], data[2], data[3])
     }
 }

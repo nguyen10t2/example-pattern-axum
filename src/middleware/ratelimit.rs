@@ -8,6 +8,7 @@ pub struct RedisRateLimiter {
 }
 
 impl RedisRateLimiter {
+    /// Tạo rate limiter trên Redis connection manager dùng chung.
     #[must_use]
     pub const fn new(manager: redis::aio::ConnectionManager) -> Self {
         Self { manager }
@@ -67,6 +68,7 @@ impl RedisRateLimiter {
     }
 }
 
+/// Lấy IP client (ưu tiên `X-Forwarded-For`), fallback loopback.
 #[must_use]
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
     headers

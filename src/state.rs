@@ -18,10 +18,7 @@ use crate::{
     },
 };
 
-/// Errors that can occur while building [`AppState`] from the environment.
-///
-/// All variants are fatal at startup: the caller is expected to log the error
-/// and exit instead of serving traffic with a half-initialized state.
+/// Các lỗi dựng [`AppState`] — đều fatal lúc boot: caller log rồi exit.
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateError {
     #[error("invalid argon2 config: {0}")]
@@ -57,14 +54,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Builds application state from the environment.
+    /// Dựng state từ env.
     ///
     /// # Errors
     ///
-    /// Returns an [`AppStateError`] if any required configuration is invalid
-    /// or if Redis cannot be reached within `REDIS_CONNECTION_TIMEOUT`.
-    /// The caller must treat this as fatal and exit (fail-fast) instead of
-    /// serving traffic with a half-initialized state.
+    /// Trả `AppStateError` khi config sai hoặc Redis unreachable — caller phải exit (fail-fast).
     pub async fn from_env() -> Result<Self, AppStateError> {
         let argon2 = Argon2Config::from_env().build_argon2()?;
         let argon2_arc = Arc::new(argon2);
@@ -126,6 +120,11 @@ impl AppState {
         })
     }
 
+    /// Chạy migrations pending trên pool đã khởi tạo.
+    ///
+    /// # Errors
+    ///
+    /// Trả `MigrateError` khi migration lỗi — caller phải exit, không được serve.
     pub async fn migrate(&self) -> Result<(), sqlx::migrate::MigrateError> {
         self.db_config.migrate(&self.db_pool).await
     }

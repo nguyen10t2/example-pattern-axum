@@ -16,11 +16,21 @@ fn verify_password_blocking(argon2: &Argon2<'_>, password: &[u8], hash: &str) ->
     Ok(argon2.verify_password(password, &parsed_hash).is_ok())
 }
 
+/// Băm password bằng Argon2 trên blocking pool (CPU nặng, không block runtime).
+///
+/// # Errors
+///
+/// Trả `SystemError` khi sinh salt hoặc băm thất bại.
 pub async fn hash_password(argon2: &Argon2<'static>, password: String) -> Result<String, SystemError> {
     let argon2 = argon2.clone();
     tokio::task::spawn_blocking(move || hash_password_blocking(&argon2, password.as_bytes())).await?
 }
 
+/// Verify password bằng Argon2 trên blocking pool.
+///
+/// # Errors
+///
+/// Trả `SystemError` khi hash lưu trữ parse lỗi; sai password thì trả `Ok(false)`.
 pub async fn verify_password(argon2: &Argon2<'static>, password: String, hash: String) -> Result<bool, SystemError> {
     let argon2 = argon2.clone();
     tokio::task::spawn_blocking(move || verify_password_blocking(&argon2, password.as_bytes(), &hash)).await?

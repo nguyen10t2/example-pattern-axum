@@ -7,6 +7,7 @@ pub struct ExpenseMapper;
 
 impl ExpenseMapper {
     #[must_use]
+    /// Map expense kèm payer sang response.
     pub fn to_response_with_payer(
         entity: &ExpenseWithPayer,
         shares: Option<Vec<ExpenseShareResponse>>,
@@ -29,6 +30,7 @@ impl ExpenseMapper {
     }
 
     #[must_use]
+    /// Map expense entity sang response (tên payer và shares truyền rời).
     pub fn to_response_from_entity(
         entity: &ExpenseEntity,
         payer_name: Option<String>,
@@ -51,6 +53,7 @@ impl ExpenseMapper {
         }
     }
 
+    /// Map share entity sang response (tên user truyền rời).
     #[must_use]
     pub const fn to_share_response(entity: &ExpenseShareEntity, user_name: Option<String>) -> ExpenseShareResponse {
         ExpenseShareResponse {
@@ -66,6 +69,7 @@ impl ExpenseMapper {
     }
 
     #[must_use]
+    /// Map share kèm user sang response.
     pub fn to_share_response_with_user(entity: &ExpenseShareWithUser) -> ExpenseShareResponse {
         ExpenseShareResponse {
             id: entity.id,

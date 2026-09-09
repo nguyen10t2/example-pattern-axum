@@ -26,10 +26,16 @@ pub struct SettlementService<SR: SettlementRepository, GR: GroupRepository> {
 }
 
 impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
+    /// Ghép repo settlement/group, cache và pool thành service.
     pub const fn new(settlement_repo: SR, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
         Self { settlement_repo, group_repo, cache, pool }
     }
 
+    /// Ghi nhận một giao dịch trả nợ, xóa cache summary nhóm.
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi ngoài nhóm, `UserNotInGroup` khi sender/receiver ngoài nhóm.
     pub async fn create(
         &self,
         data: CreateSettlementRequest,
@@ -71,6 +77,11 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         Ok(SettlementMapper::to_response(&settlement))
     }
 
+    /// Lấy settlement theo id (phải là thành viên nhóm).
+    ///
+    /// # Errors
+    ///
+    /// Trả `SettlementNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm.
     pub async fn find_by_id(&self, id: Uuid, current_user_id: Uuid) -> Result<SettlementResponse, AppError> {
         let settlement = self.settlement_repo.find_by_id(&self.pool, id).await?;
         let settlement = settlement.ok_or(AppError::Business(BusinessError::SettlementNotFound))?;
@@ -79,6 +90,11 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         Ok(SettlementMapper::to_response(&settlement))
     }
 
+    /// Liệt kê settlements của nhóm có phân trang (phải là thành viên).
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi ngoài nhóm.
     pub async fn find_by_group(
         &self,
         group_id: Uuid,
@@ -100,6 +116,12 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         Ok(PaginatedResponse::new(response_items, total, pagination.page(), limit))
     }
 
+    /// Hủy settlement (2 bên tham gia hoặc admin), xóa cache summary nhóm.
+    ///
+    /// # Errors
+    ///
+    /// Trả `SettlementNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm,
+    /// `DeletePermissionDenied` khi không có quyền.
     pub async fn cancel_settlement(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
         let settlement = self.settlement_repo.find_by_id(&self.pool, id).await?;
         let settlement = settlement.ok_or(AppError::Business(BusinessError::SettlementNotFound))?;
@@ -125,6 +147,11 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         Ok(())
     }
 
+    /// Chặn nếu user không phải thành viên nhóm của settlement.
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi user ngoài nhóm.
     async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
         if !members.iter().any(|m| m.user_id == user_id) {
