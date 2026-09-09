@@ -1,4 +1,7 @@
-use crate::errors::{AppError, BusinessError, SystemError};
+use crate::{
+    config::constants::{DEFAULT_FRONTEND_URL, GOOGLE_CALLBACK_PATH},
+    errors::{AppError, BusinessError, SystemError},
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -25,7 +28,7 @@ impl Default for GoogleOAuthConfig {
             client_id: std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
             client_secret: std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default(),
             redirect_uri: std::env::var("GOOGLE_REDIRECT_URI")
-                .unwrap_or_else(|_| "http://localhost:5173/api/users/auth/google/callback".to_string()),
+                .unwrap_or_else(|_| format!("{DEFAULT_FRONTEND_URL}{GOOGLE_CALLBACK_PATH}")),
         }
     }
 }

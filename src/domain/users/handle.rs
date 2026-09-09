@@ -7,11 +7,15 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use std::time::Duration;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{
+    config::constants::{
+        DEFAULT_FRONTEND_URL, OAUTH_COOKIE_MAX_AGE_SECS, RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,
+        RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_REQUEST_OTP_IP_MAX,
+        RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW,
+    },
     domain::users::request::{
         ChangePasswordRequest, ForgotPasswordOtpRequest, GoogleCallbackQuery, RequestOtpRequest, ResetPasswordRequest,
         SignInRequest, SignUpRequest, UpdateUserRequest,
@@ -55,7 +59,7 @@ pub async fn handle_request_otp(
     ValidatedJson(body): ValidatedJson<RequestOtpRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
     let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_ip_limit("request-otp", &ip, 3, Duration::from_secs(60)).await {
+    if !state.rate_limiter.check_ip_limit("request-otp", &ip, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_WINDOW).await {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
@@ -77,7 +81,11 @@ pub async fn handle_forgot_password_otp(
     ValidatedJson(body): ValidatedJson<ForgotPasswordOtpRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
     let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_ip_limit("forgot-password-otp", &ip, 3, Duration::from_secs(60)).await {
+    if !state
+        .rate_limiter
+        .check_ip_limit("forgot-password-otp", &ip, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_WINDOW)
+        .await
+    {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
@@ -100,7 +108,7 @@ pub async fn handle_signin(
     ValidatedJson(body): ValidatedJson<SignInRequest>,
 ) -> Result<(CookieJar, SuccessResponse<AuthResponse>), AppError> {
     let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_ip_limit("signin", &ip, 5, Duration::from_secs(60)).await {
+    if !state.rate_limiter.check_ip_limit("signin", &ip, RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW).await {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
@@ -174,13 +182,13 @@ pub async fn handle_google_auth(
     let mut state_cookie = Cookie::new("google_oauth_state", oauth_state);
     state_cookie.set_path("/");
     state_cookie.set_http_only(true);
-    state_cookie.set_max_age(time::Duration::seconds(600));
+    state_cookie.set_max_age(time::Duration::seconds(OAUTH_COOKIE_MAX_AGE_SECS));
     state_cookie.set_same_site(SameSite::Lax);
 
     let mut verifier_cookie = Cookie::new("google_oauth_code_verifier", code_verifier);
     verifier_cookie.set_path("/");
     verifier_cookie.set_http_only(true);
-    verifier_cookie.set_max_age(time::Duration::seconds(600));
+    verifier_cookie.set_max_age(time::Duration::seconds(OAUTH_COOKIE_MAX_AGE_SECS));
     verifier_cookie.set_same_site(SameSite::Lax);
 
     let jar = jar.add(state_cookie).add(verifier_cookie);
@@ -210,7 +218,7 @@ pub async fn handle_google_callback(
     let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION as i64);
     refresh_cookie.set_expires(expires);
 
-    let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
+    let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| DEFAULT_FRONTEND_URL.to_string());
     let redirect_url = format!("{}/login?token={}", frontend_url, tokens.access_token);
 
     let jar = jar
@@ -245,7 +253,18 @@ pub async fn handle_change_password(
     ValidatedJson(body): ValidatedJson<ChangePasswordRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
     let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_mixed_limit("change-password", user_id, &ip, 3, 10, Duration::from_secs(60)).await {
+    if !state
+        .rate_limiter
+        .check_mixed_limit(
+            "change-password",
+            user_id,
+            &ip,
+            RATE_LIMIT_CHANGE_PASSWORD_USER_MAX,
+            RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,
+            RATE_LIMIT_WINDOW,
+        )
+        .await
+    {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 

@@ -7,9 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const CACHE_EXPIRATION: u64 = 60; // 1 minute
-pub const REFRESH_TOKEN_EXPIRATION: u64 = 7 * 24 * 60 * 60; // 7 days
-pub const OTP_EXPIRATION: u64 = 2 * 60; // 2 minutes
+// Cache TTLs live in [`crate::config::constants`]; re-exported here so
+// existing `utils::cache::{...}` imports keep working.
+pub use crate::config::constants::{CACHE_EXPIRATION, OTP_EXPIRATION, REFRESH_TOKEN_EXPIRATION};
 
 #[async_trait]
 pub trait CacheStore: Send + Sync {

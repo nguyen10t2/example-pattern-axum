@@ -16,6 +16,8 @@ use dsa::{
     state::AppState,
 };
 
+use dsa::config::constants::{DEFAULT_FRONTEND_URL, DEFAULT_HOST, DEFAULT_PORT, MAX_BODY_BYTES};
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -28,11 +30,17 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let host = std::env::var("HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
+    let port = std::env::var("PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string());
     let addr = dbg!(format!("{host}:{port}"));
 
-    let state = AppState::from_env().await;
+    let state = match AppState::from_env().await {
+        Ok(state) => state,
+        Err(e) => {
+            tracing::error!("Failed to initialize application state: {e}");
+            std::process::exit(1);
+        }
+    };
 
     // Run migrations — fatal if they fail, server must not start on an un-migrated DB
     if let Err(e) = state.migrate().await {
@@ -40,11 +48,11 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
+    let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| DEFAULT_FRONTEND_URL.to_string());
 
     let cors = CorsLayer::new()
         .allow_origin(
-            frontend_url.parse::<HeaderValue>().unwrap_or_else(|_| HeaderValue::from_static("http://localhost:5173")),
+            frontend_url.parse::<HeaderValue>().unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_FRONTEND_URL)),
         )
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
         .allow_headers([
@@ -62,7 +70,7 @@ async fn main() {
         .nest("/api/expenses", expense_router(state.clone()))
         .nest("/api/settlements", settlement_router(state.clone()))
         .route("/", get(root_info))
-        .layer(DefaultBodyLimit::max(1_048_576))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(cors)
         .layer(from_fn(security_headers))
         .layer(from_fn(log_errors))

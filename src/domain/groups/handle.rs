@@ -4,10 +4,13 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, post},
 };
-use std::time::Duration;
 use uuid::Uuid;
 
 use crate::{
+    config::constants::{
+        RATE_LIMIT_CREATE_GROUP_IP_MAX, RATE_LIMIT_CREATE_GROUP_USER_MAX, RATE_LIMIT_JOIN_GROUP_IP_MAX,
+        RATE_LIMIT_JOIN_GROUP_USER_MAX, RATE_LIMIT_WINDOW,
+    },
     domain::groups::{
         request::{AddMemberRequest, CreateGroupRequest, JoinGroupRequest},
         response::{GroupMemberResponse, GroupResponse, GroupSummaryResponse},
@@ -43,7 +46,18 @@ pub async fn handle_create_group(
     ValidatedJson(body): ValidatedJson<CreateGroupRequest>,
 ) -> Result<(StatusCode, SuccessResponse<GroupResponse>), AppError> {
     let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_mixed_limit("create-group", user_id, &ip, 5, 20, Duration::from_secs(60)).await {
+    if !state
+        .rate_limiter
+        .check_mixed_limit(
+            "create-group",
+            user_id,
+            &ip,
+            RATE_LIMIT_CREATE_GROUP_USER_MAX,
+            RATE_LIMIT_CREATE_GROUP_IP_MAX,
+            RATE_LIMIT_WINDOW,
+        )
+        .await
+    {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
@@ -58,7 +72,18 @@ pub async fn handle_join_group(
     ValidatedJson(body): ValidatedJson<JoinGroupRequest>,
 ) -> Result<SuccessResponse<GroupResponse>, AppError> {
     let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_mixed_limit("join-group", user_id, &ip, 10, 30, Duration::from_secs(60)).await {
+    if !state
+        .rate_limiter
+        .check_mixed_limit(
+            "join-group",
+            user_id,
+            &ip,
+            RATE_LIMIT_JOIN_GROUP_USER_MAX,
+            RATE_LIMIT_JOIN_GROUP_IP_MAX,
+            RATE_LIMIT_WINDOW,
+        )
+        .await
+    {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 

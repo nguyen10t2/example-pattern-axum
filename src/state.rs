@@ -2,7 +2,7 @@ use argon2::Argon2;
 use std::sync::Arc;
 
 use crate::{
-    config::{Argon2Config, DatabaseConfig},
+    config::{Argon2Config, DatabaseConfig, RedisConfig, constants::MAILER_BUFFER_SIZE},
     domain::{
         expenses::{pg::PostgresExpenseRepository, service::ExpenseService},
         groups::{pg::PostgresGroupRepository, service::GroupService},
@@ -17,6 +17,22 @@ use crate::{
         oauth::GoogleOAuthConfig,
     },
 };
+
+/// Errors that can occur while building [`AppState`] from the environment.
+///
+/// All variants are fatal at startup: the caller is expected to log the error
+/// and exit instead of serving traffic with a half-initialized state.
+#[derive(Debug, thiserror::Error)]
+pub enum AppStateError {
+    #[error("invalid argon2 config: {0}")]
+    InvalidArgon2(#[from] argon2::Error),
+    #[error("invalid database configuration: {0}")]
+    InvalidDatabase(#[from] crate::config::ConfigError),
+    #[error("invalid database url: {0}")]
+    InvalidDatabaseUrl(#[from] sqlx::Error),
+    #[error(transparent)]
+    Redis(#[from] crate::config::RedisConnectError),
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -41,19 +57,23 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn from_env() -> Self {
-        let argon2 = Argon2Config::from_env().build_argon2().expect("invalid argon2 config");
+    /// Builds application state from the environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AppStateError`] if any required configuration is invalid
+    /// or if Redis cannot be reached within `REDIS_CONNECTION_TIMEOUT`.
+    /// The caller must treat this as fatal and exit (fail-fast) instead of
+    /// serving traffic with a half-initialized state.
+    pub async fn from_env() -> Result<Self, AppStateError> {
+        let argon2 = Argon2Config::from_env().build_argon2()?;
         let argon2_arc = Arc::new(argon2);
-        let db_config = DatabaseConfig::from_env();
-        let pool = db_config.connect_lazy().expect("failed to connect to database");
+        let db_config = DatabaseConfig::builder().from_env().build()?;
+        let pool = db_config.connect_lazy()?;
         tracing::debug!("database pool created (lazy; first connection deferred until first query)");
 
-        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-        tracing::debug!("connecting to redis at {redis_url}");
-        let redis_client = redis::Client::open(redis_url.as_str()).expect("invalid redis url");
-        let connection_manager =
-            redis::aio::ConnectionManager::new(redis_client).await.expect("failed to connect to redis");
-        tracing::debug!("redis connection established");
+        let redis_config = RedisConfig::from_env();
+        let connection_manager = redis_config.connect().await?;
 
         let cache: Arc<dyn CacheStore> = Arc::new(RedisCache::new(connection_manager.clone()));
         let rate_limiter = RedisRateLimiter::new(connection_manager.clone());
@@ -65,7 +85,7 @@ impl AppState {
         let group_repo = PostgresGroupRepository::new();
         let settlement_repo = PostgresSettlementRepository::new();
 
-        let mailer = Mailer::new(128);
+        let mailer = Mailer::new(MAILER_BUFFER_SIZE);
 
         let user_service = Arc::new(UserService::new(
             user_repo.clone(),
@@ -91,7 +111,7 @@ impl AppState {
         let settlement_service =
             Arc::new(SettlementService::new(settlement_repo.clone(), group_repo.clone(), cache.clone(), pool.clone()));
 
-        Self {
+        Ok(Self {
             user_service,
             group_service,
             expense_service,
@@ -103,7 +123,7 @@ impl AppState {
             argon2: argon2_arc,
             db_pool: pool,
             db_config: Arc::new(db_config),
-        }
+        })
     }
 
     pub async fn migrate(&self) -> Result<(), sqlx::migrate::MigrateError> {

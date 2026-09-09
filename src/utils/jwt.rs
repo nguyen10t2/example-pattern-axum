@@ -1,4 +1,10 @@
-use crate::errors::{AppError, BusinessError};
+use crate::{
+    config::constants::{
+        DEFAULT_JWT_AUDIENCE, DEFAULT_JWT_ISSUER, DEFAULT_JWT_SECRET, JWT_ACCESS_TOKEN_EXPIRATION_SECS,
+        JWT_REFRESH_TOKEN_EXPIRATION_SECS,
+    },
+    errors::{AppError, BusinessError},
+};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
@@ -39,12 +45,11 @@ pub struct JwtConfig {
 impl Default for JwtConfig {
     fn default() -> Self {
         Self {
-            secret: std::env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "default_splitdebt_jwt_secret_key_12345".to_string()),
-            issuer: std::env::var("JWT_ISSUER").unwrap_or_else(|_| "default-issuer".to_string()),
-            audience: std::env::var("JWT_AUDIENCE").unwrap_or_else(|_| "default-audience".to_string()),
-            access_token_expiration_secs: 15 * 60,           // 15 minutes
-            refresh_token_expiration_secs: 7 * 24 * 60 * 60, // 7 days
+            secret: std::env::var("JWT_SECRET").unwrap_or_else(|_| DEFAULT_JWT_SECRET.to_string()),
+            issuer: std::env::var("JWT_ISSUER").unwrap_or_else(|_| DEFAULT_JWT_ISSUER.to_string()),
+            audience: std::env::var("JWT_AUDIENCE").unwrap_or_else(|_| DEFAULT_JWT_AUDIENCE.to_string()),
+            access_token_expiration_secs: JWT_ACCESS_TOKEN_EXPIRATION_SECS,
+            refresh_token_expiration_secs: JWT_REFRESH_TOKEN_EXPIRATION_SECS,
         }
     }
 }

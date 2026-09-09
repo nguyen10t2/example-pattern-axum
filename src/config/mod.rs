@@ -1,5 +1,7 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 
+pub mod constants;
+
 // ---------------------------------------------------------------------------
 // Argon2Config + Builder
 // ---------------------------------------------------------------------------
@@ -324,6 +326,172 @@ impl DatabaseConfig {
 }
 
 // ---------------------------------------------------------------------------
+// RedisConfig + Builder
+// ---------------------------------------------------------------------------
+
+/// Configuration for the `Redis` connection manager.
+#[derive(Debug, Clone)]
+pub struct RedisConfig {
+    pub url: String,
+    pub connection_timeout: std::time::Duration,
+    pub response_timeout: std::time::Duration,
+}
+
+/// Builder for [`RedisConfig`].
+///
+/// # Defaults
+///
+/// | Field              | Default                   |
+/// |--------------------|---------------------------|
+/// | url                | `redis://127.0.0.1:6379`  |
+/// | connection_timeout | 5 s                       |
+/// | response_timeout   | 2 s                       |
+#[derive(Debug, Clone)]
+pub struct RedisConfigBuilder {
+    url: Option<String>,
+    connection_timeout: std::time::Duration,
+    response_timeout: std::time::Duration,
+}
+
+impl Default for RedisConfigBuilder {
+    fn default() -> Self {
+        Self {
+            url: None,
+            connection_timeout: std::time::Duration::from_secs(5),
+            response_timeout: std::time::Duration::from_secs(2),
+        }
+    }
+}
+
+impl RedisConfigBuilder {
+    /// Creates a new builder with default values.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the Redis connection URL. Default: `redis://127.0.0.1:6379`.
+    #[must_use]
+    pub fn url(mut self, url: impl Into<String>) -> Self {
+        self.url = Some(url.into());
+        self
+    }
+
+    /// Sets the per-attempt timeout for establishing a Redis connection.
+    /// This is also used as the overall bound for the initial connect so the
+    /// server fails fast instead of hanging forever. Default: 5 seconds.
+    #[must_use]
+    pub fn connection_timeout(mut self, d: std::time::Duration) -> Self {
+        self.connection_timeout = d;
+        self
+    }
+
+    /// Sets the timeout for each Redis command (applied via
+    /// `ConnectionManagerConfig::set_response_timeout`), so a hung Redis
+    /// surfaces as an error instead of hanging request handlers. Default: 2 seconds.
+    #[must_use]
+    pub fn response_timeout(mut self, d: std::time::Duration) -> Self {
+        self.response_timeout = d;
+        self
+    }
+
+    /// Populates fields from environment variables, falling back to the
+    /// current builder values.
+    ///
+    /// # Environment Variables
+    ///
+    /// | Env var                  | Field                  |
+    /// |--------------------------|------------------------|
+    /// | `REDIS_URL`              | url                    |
+    /// | `REDIS_CONNECTION_TIMEOUT` | connection_timeout (seconds) |
+    /// | `REDIS_RESPONSE_TIMEOUT`   | response_timeout (seconds)   |
+    #[must_use]
+    pub fn from_env(self) -> Self {
+        Self {
+            url: Some(self.url.unwrap_or_else(|| {
+                std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
+            })),
+            connection_timeout: std::time::Duration::from_secs(parse_env(
+                "REDIS_CONNECTION_TIMEOUT",
+                self.connection_timeout.as_secs(),
+            )),
+            response_timeout: std::time::Duration::from_secs(parse_env(
+                "REDIS_RESPONSE_TIMEOUT",
+                self.response_timeout.as_secs(),
+            )),
+        }
+    }
+
+    /// Consumes the builder and returns a [`RedisConfig`].
+    #[must_use]
+    pub fn build(self) -> RedisConfig {
+        RedisConfig {
+            url: self.url.unwrap_or_else(|| "redis://127.0.0.1:6379".to_string()),
+            connection_timeout: self.connection_timeout,
+            response_timeout: self.response_timeout,
+        }
+    }
+}
+
+impl RedisConfig {
+    /// Returns a new builder.
+    #[must_use]
+    pub fn builder() -> RedisConfigBuilder {
+        RedisConfigBuilder::new()
+    }
+
+    /// Convenience shortcut: `RedisConfigBuilder::new().from_env().build()`.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::builder().from_env().build()
+    }
+
+    /// Establishes a Redis connection manager with timeouts applied.
+    ///
+    /// The per-attempt TCP timeout and the per-command response timeout are
+    /// taken from this config, and the total initial-connect wait is capped at
+    /// `connection_timeout` so an unreachable Redis fails fast instead of
+    /// hanging startup forever (retries are kept low on purpose).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RedisConnectError`] if the URL is invalid, the initial
+    /// connect times out, or the connection cannot be established.
+    pub async fn connect(&self) -> Result<redis::aio::ConnectionManager, RedisConnectError> {
+        tracing::debug!(
+            "connecting to redis (connection_timeout={}s, response_timeout={}s)",
+            self.connection_timeout.as_secs(),
+            self.response_timeout.as_secs()
+        );
+        let client = redis::Client::open(self.url.as_str()).map_err(RedisConnectError::InvalidUrl)?;
+        let manager_config = redis::aio::ConnectionManagerConfig::new()
+            .set_connection_timeout(self.connection_timeout)
+            .set_response_timeout(self.response_timeout)
+            .set_number_of_retries(2);
+        let manager = tokio::time::timeout(
+            self.connection_timeout,
+            redis::aio::ConnectionManager::new_with_config(client, manager_config),
+        )
+        .await
+        .map_err(|_| RedisConnectError::ConnectionTimeout(self.connection_timeout.as_secs()))?
+        .map_err(RedisConnectError::ConnectionFailed)?;
+        tracing::debug!("redis connection established");
+        Ok(manager)
+    }
+}
+
+/// Errors that can occur while establishing a Redis connection via [`RedisConfig::connect`].
+#[derive(Debug, thiserror::Error)]
+pub enum RedisConnectError {
+    #[error("invalid redis url: {0}")]
+    InvalidUrl(#[source] redis::RedisError),
+    #[error("timed out connecting to redis after {0}s")]
+    ConnectionTimeout(u64),
+    #[error("failed to connect to redis: {0}")]
+    ConnectionFailed(#[source] redis::RedisError),
+}
+
+// ---------------------------------------------------------------------------
 // ConfigError
 // ---------------------------------------------------------------------------
 
@@ -403,5 +571,27 @@ mod tests {
         assert_eq!(cfg.max_connections, 5);
         assert_eq!(cfg.min_connections, 1);
         assert_eq!(cfg.acquire_slow_threshold, std::time::Duration::from_secs(2));
+    }
+
+    // -- RedisConfigBuilder --------------------------------------------------
+
+    #[test]
+    fn test_redis_builder_defaults_applied() {
+        let cfg = RedisConfigBuilder::new().build();
+        assert_eq!(cfg.url, "redis://127.0.0.1:6379");
+        assert_eq!(cfg.connection_timeout, std::time::Duration::from_secs(5));
+        assert_eq!(cfg.response_timeout, std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn test_redis_builder_overrides() {
+        let cfg = RedisConfigBuilder::new()
+            .url("redis://localhost:6380")
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .response_timeout(std::time::Duration::from_secs(1))
+            .build();
+        assert_eq!(cfg.url, "redis://localhost:6380");
+        assert_eq!(cfg.connection_timeout, std::time::Duration::from_secs(1));
+        assert_eq!(cfg.response_timeout, std::time::Duration::from_secs(1));
     }
 }
