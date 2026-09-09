@@ -154,6 +154,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     /// # Errors
     ///
     /// Trả `NotGroupMember` khi user ngoài nhóm, `GroupNotFound` khi nhóm không tồn tại.
+    #[tracing::instrument(skip(self), fields(group_id = %group_id))]
     pub async fn get_group_summary(
         &self,
         group_id: Uuid,
