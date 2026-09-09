@@ -5,6 +5,7 @@ use axum::{
     response::Response,
 };
 
+/// Middleware gắn security headers cơ bản (nosniff, DENY frame, HSTS, CSP, referrer).
 pub async fn security_headers(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();

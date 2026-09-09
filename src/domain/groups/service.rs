@@ -40,6 +40,7 @@ pub struct GroupService<GR: GroupRepository, ER: ExpenseRepository, SR: Settleme
 impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: UserRepository>
     GroupService<GR, ER, SR, UR>
 {
+    /// Ghép các repo, cache và pool thành service group.
     pub const fn new(
         group_repo: GR,
         expense_repo: ER,
@@ -51,6 +52,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Self { group_repo, expense_repo, settlement_repo, user_repo, cache, pool }
     }
 
+    /// Tạo nhóm mới, tự gán người tạo làm `ADMIN` (1 transaction).
+    ///
+    /// # Errors
+    ///
+    /// Trả lỗi DB khi ghi thất bại.
     pub async fn create(&self, data: CreateGroupRequest, creator_id: Uuid) -> Result<GroupResponse, AppError> {
         let group_id = Uuid::now_v7();
         let invite_code = generate_invite_code();
@@ -78,6 +84,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(GroupMapper::to_response(&group))
     }
 
+    /// Cho user vào nhóm bằng invite code (đã vào rồi thì bỏ qua, vẫn `Ok`).
+    ///
+    /// # Errors
+    ///
+    /// Trả `InvalidInviteCode` khi code không tồn tại.
     pub async fn join_by_invite_code(&self, code: &str, user_id: Uuid) -> Result<GroupResponse, AppError> {
         let group = self.group_repo.find_by_invite_code(&self.pool, code).await?;
         let Some(group) = group else {
@@ -107,11 +118,21 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(GroupMapper::to_response(&group))
     }
 
+    /// Liệt kê các nhóm mà user tham gia.
+    ///
+    /// # Errors
+    ///
+    /// Trả lỗi DB khi đọc thất bại.
     pub async fn find_all_by_user(&self, user_id: Uuid) -> Result<Vec<GroupResponse>, AppError> {
         let groups = self.group_repo.find_all_by_user(&self.pool, user_id).await?;
         Ok(groups.iter().map(GroupMapper::to_response_with_balance).collect())
     }
 
+    /// Lấy nhóm theo id; nếu có `current_user_id` thì check membership song song.
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi user ngoài nhóm, `GroupNotFound` khi nhóm không tồn tại.
     pub async fn find_by_id(&self, id: Uuid, current_user_id: Option<Uuid>) -> Result<GroupResponse, AppError> {
         let group_opt = if let Some(user_id) = current_user_id {
             let ((), group_opt) = tokio::try_join!(self.ensure_membership(id, user_id), async {
@@ -126,6 +147,13 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(GroupMapper::to_response(&group))
     }
 
+    /// Tổng hợp nhóm: số dư từng thành viên + gợi ý trả nợ, cache 1 phút.
+    ///
+    /// Đọc group/expenses/settlements song song rồi chạy `DebtEngine` thuần CPU.
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi user ngoài nhóm, `GroupNotFound` khi nhóm không tồn tại.
     pub async fn get_group_summary(
         &self,
         group_id: Uuid,
@@ -172,8 +200,8 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             .iter()
             .map(|s| SettlementForEngine { sender_id: s.sender_id, receiver_id: s.receiver_id, amount: s.amount })
             .collect();
-        let balances = DebtEngine::calculate_net_balances(&user_ids, &engine_expenses, &engine_settlements).await?;
-        let suggestions = DebtEngine::simplify_debts(&balances).await?;
+        let balances = DebtEngine::calculate_net_balances(&user_ids, &engine_expenses, &engine_settlements);
+        let suggestions = DebtEngine::simplify_debts(&balances);
 
         let summary = GroupSummaryResponse {
             id: group.id,
@@ -212,6 +240,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(summary)
     }
 
+    /// Thêm thành viên vào nhóm (chỉ admin), xóa cache summary.
+    ///
+    /// # Errors
+    ///
+    /// Trả `AdminRequired` khi không phải admin, `Conflict` khi user đã trong nhóm.
     pub async fn add_member(
         &self,
         group_id: Uuid,
@@ -244,6 +277,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         })
     }
 
+    /// Liệt kê thành viên nhóm (phải là thành viên mới xem được).
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi user ngoài nhóm.
     pub async fn get_members(
         &self,
         group_id: Uuid,
@@ -254,6 +292,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(members.iter().map(GroupMapper::to_member_response).collect())
     }
 
+    /// Lấy danh sách thành viên kèm user (dùng nội bộ service).
+    ///
+    /// # Errors
+    ///
+    /// Trả lỗi DB khi đọc thất bại.
     pub async fn find_members(
         &self,
         group_id: Uuid,
@@ -262,6 +305,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(members)
     }
 
+    /// Xóa mềm nhóm (chỉ admin), xóa cache summary.
+    ///
+    /// # Errors
+    ///
+    /// Trả `AdminRequired` khi không phải admin, `GroupNotFound` khi nhóm không tồn tại.
     pub async fn delete_group(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
         self.ensure_admin(id, current_user_id).await?;
         let result = self.group_repo.soft_delete(&self.pool, id).await?;
@@ -273,6 +321,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(())
     }
 
+    /// Chặn nếu user không phải thành viên nhóm.
+    ///
+    /// # Errors
+    ///
+    /// Trả `NotGroupMember` khi user ngoài nhóm.
     pub async fn ensure_membership(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
         if !members.iter().any(|m| m.user_id == user_id) {
@@ -281,6 +334,11 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         Ok(())
     }
 
+    /// Chặn nếu user không phải admin nhóm.
+    ///
+    /// # Errors
+    ///
+    /// Trả `AdminRequired` khi user ngoài nhóm hoặc không phải admin.
     pub async fn ensure_admin(&self, group_id: Uuid, user_id: Uuid) -> Result<(), AppError> {
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
         let member = members.iter().find(|m| m.user_id == user_id);

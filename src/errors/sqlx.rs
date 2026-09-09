@@ -1,11 +1,8 @@
 use super::{AppError, BusinessError};
 
-/// Map a unique constraint violation (Postgres 23505) to `BusinessError`.
+/// Map lỗi trùng unique (Postgres 23505) sang `BusinessError`.
 ///
-/// Takes a list of `(constraint_pattern, error_message)` pairs.
-/// If the DB error is a unique violation and its constraint name contains
-/// a pattern, returns the corresponding business error. Otherwise falls
-/// back to `AppError::from(err)`.
+/// Nhận danh sách cặp `(mẫu-tên-constraint, message)`; không khớp thì trả `AppError::from(err)`.
 ///
 /// # Example
 ///

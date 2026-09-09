@@ -55,11 +55,17 @@ impl Default for JwtConfig {
 }
 
 impl JwtConfig {
+    /// Đọc cấu hình JWT từ env (có fallback dev).
     #[must_use]
     pub fn from_env() -> Self {
         Self::default()
     }
 
+    /// Ký access token 15 phút cho user.
+    ///
+    /// # Errors
+    ///
+    /// Trả `Unauthorized` khi sign JWT thất bại.
     pub fn gen_access_token(&self, user_id: Uuid) -> Result<String, AppError> {
         let now = usize::try_from(Utc::now().timestamp()).unwrap_or_default();
         let claims = AccessClaims {
@@ -75,6 +81,11 @@ impl JwtConfig {
             .map_err(|_| AppError::Business(BusinessError::Unauthorized))
     }
 
+    /// Ký refresh token 7 ngày gắn `jti` cho user.
+    ///
+    /// # Errors
+    ///
+    /// Trả `Unauthorized` khi sign JWT thất bại.
     pub fn gen_refresh_token(&self, user_id: Uuid, jti: &str) -> Result<String, AppError> {
         let now = usize::try_from(Utc::now().timestamp()).unwrap_or_default();
         let claims = RefreshClaims {
@@ -91,6 +102,11 @@ impl JwtConfig {
             .map_err(|_| AppError::Business(BusinessError::Unauthorized))
     }
 
+    /// Verify access token đúng issuer/audience và đúng `type`.
+    ///
+    /// # Errors
+    ///
+    /// Trả `Unauthorized` khi token sai, hết hạn hoặc sai loại.
     pub fn verify_access_token(&self, token: &str) -> Result<AccessClaims, AppError> {
         let mut validation = Validation::default();
         validation.set_issuer(&[&self.issuer]);
@@ -106,6 +122,11 @@ impl JwtConfig {
         Ok(token_data.claims)
     }
 
+    /// Verify refresh token đúng issuer/audience và đúng `type`.
+    ///
+    /// # Errors
+    ///
+    /// Trả `Unauthorized` khi token sai, hết hạn hoặc sai loại.
     pub fn verify_refresh_token(&self, token: &str) -> Result<RefreshClaims, AppError> {
         let mut validation = Validation::default();
         validation.set_issuer(&[&self.issuer]);

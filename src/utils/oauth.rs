@@ -34,11 +34,13 @@ impl Default for GoogleOAuthConfig {
 }
 
 impl GoogleOAuthConfig {
+    /// Đọc cấu hình OAuth Google từ env (có fallback dev).
     #[must_use]
     pub fn from_env() -> Self {
         Self::default()
     }
 
+    /// Dựng URL authorize Google (PKCE `S256`) cho frontend redirect.
     #[must_use]
     pub fn generate_auth_url(&self, state: &str, code_challenge: &str) -> String {
         format!(
@@ -47,6 +49,11 @@ impl GoogleOAuthConfig {
         )
     }
 
+    /// Lấy profile Google bằng access token (I/O mạng, phải async).
+    ///
+    /// # Errors
+    ///
+    /// Trả `Unauthorized` khi Google từ chối, lỗi hệ thống khi parse response.
     pub async fn fetch_user_info(&self, access_token: &str) -> Result<GoogleUserInfo, AppError> {
         let client = reqwest::Client::new();
         let resp = client
@@ -66,11 +73,13 @@ impl GoogleOAuthConfig {
     }
 }
 
+/// Sinh state chống CSRF cho flow OAuth.
 #[must_use]
 pub fn generate_state() -> String {
     Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()
 }
 
+/// Sinh code verifier cho flow PKCE.
 #[must_use]
 pub fn generate_code_verifier() -> String {
     Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()

@@ -7,16 +7,19 @@ pub struct PaginationQuery {
 }
 
 impl PaginationQuery {
+    /// Trang hiện tại (tối thiểu 1).
     #[must_use]
     pub fn page(&self) -> i64 {
         self.page.unwrap_or(1).max(1)
     }
 
+    /// Số dòng mỗi trang (kẹp 1–100).
     #[must_use]
     pub fn limit(&self) -> i64 {
         self.limit.unwrap_or(20).clamp(1, 100)
     }
 
+    /// Vị trí bắt đầu đọc (`(page-1) * limit`).
     #[must_use]
     pub fn offset(&self) -> i64 {
         (self.page() - 1) * self.limit()
@@ -39,6 +42,7 @@ pub struct PaginatedResponse<T> {
 }
 
 impl<T> PaginatedResponse<T> {
+    /// Gom items + meta phân trang (tổng số trang tính ceil chính xác).
     #[must_use]
     pub const fn new(items: Vec<T>, total: i64, page: i64, limit: i64) -> Self {
         // `total` is a row count, never negative: exact integer ceil without float casts.

@@ -1,9 +1,8 @@
-//! Shared application-wide default constants.
+//! Giá trị mặc định dùng chung toàn app.
 //!
-//! Single source of truth for magic values that were previously scattered as
-//! literals across handlers, `main.rs` and utils (timeouts, rate-limit
-//! budgets, TTLs, fallback URLs, ...). Environment variables still override
-//! these at runtime where supported — the constants only define the fallbacks.
+//! Single source of truth thay cho magic values rải rác ở handlers, `main.rs` và utils
+//! (timeout, quota rate-limit, TTL, URL fallback, ...). Biến môi trường vẫn override
+//! được lúc runtime — const ở đây chỉ là fallback.
 
 use std::time::Duration;
 
@@ -11,84 +10,91 @@ use std::time::Duration;
 // Server
 // ---------------------------------------------------------------------------
 
-/// Default bind host (`HOST`).
+/// Host bind mặc định (`HOST`).
 pub const DEFAULT_HOST: &str = "0.0.0.0";
-/// Default bind port (`PORT`).
+/// Port bind mặc định (`PORT`).
 pub const DEFAULT_PORT: &str = "3000";
-/// Max request body size in bytes (1 MiB).
+/// Body request tối đa, bytes (1 MiB).
 pub const MAX_BODY_BYTES: usize = 1_048_576;
 
 // ---------------------------------------------------------------------------
 // Frontend
 // ---------------------------------------------------------------------------
 
-/// Default frontend base URL (`FRONTEND_URL`, `REDIS_URL`-style fallback).
+/// Base URL frontend mặc định (`FRONTEND_URL`).
 pub const DEFAULT_FRONTEND_URL: &str = "http://localhost:5173";
-/// Google OAuth callback path, appended to the frontend base URL.
+/// Path callback OAuth Google, nối sau base URL frontend.
 pub const GOOGLE_CALLBACK_PATH: &str = "/api/users/auth/google/callback";
 
 // ---------------------------------------------------------------------------
-// Cache TTLs (seconds)
+// Cache TTLs (giây)
 // ---------------------------------------------------------------------------
 
-/// Generic short-lived cache entries (e.g. group summaries, user profiles).
+/// Cache ngắn hạn chung (summary nhóm, profile user, ...).
 pub const CACHE_EXPIRATION: u64 = 60; // 1 minute
-/// Refresh-token / session entries.
+/// Cache refresh-token / session.
 pub const REFRESH_TOKEN_EXPIRATION: u64 = 7 * 24 * 60 * 60; // 7 days
-/// One-time-password entries.
+/// Cache mã OTP.
 pub const OTP_EXPIRATION: u64 = 2 * 60; // 2 minutes
 
 // ---------------------------------------------------------------------------
 // JWT
 // ---------------------------------------------------------------------------
 
-/// Access-token lifetime in seconds (15 minutes).
+/// Tuổi thọ access-token, giây (15 phút).
 pub const JWT_ACCESS_TOKEN_EXPIRATION_SECS: usize = 15 * 60;
-/// Refresh-token lifetime in seconds (7 days, mirrors [`REFRESH_TOKEN_EXPIRATION`]).
+/// Tuổi thọ refresh-token, giây (7 ngày, khớp [`REFRESH_TOKEN_EXPIRATION`]).
 pub const JWT_REFRESH_TOKEN_EXPIRATION_SECS: usize = 7 * 24 * 60 * 60;
-/// Fallback secret when `JWT_SECRET` is unset (dev only).
+/// Secret fallback khi thiếu `JWT_SECRET` (chỉ dev).
 pub const DEFAULT_JWT_SECRET: &str = "default_splitdebt_jwt_secret_key_12345";
-/// Fallback issuer when `JWT_ISSUER` is unset.
+/// Issuer fallback khi thiếu `JWT_ISSUER`.
 pub const DEFAULT_JWT_ISSUER: &str = "default-issuer";
-/// Fallback audience when `JWT_AUDIENCE` is unset.
+/// Audience fallback khi thiếu `JWT_AUDIENCE`.
 pub const DEFAULT_JWT_AUDIENCE: &str = "default-audience";
 
 // ---------------------------------------------------------------------------
 // Rate limiting
 // ---------------------------------------------------------------------------
 
-/// Shared rate-limit window for all actions.
+/// Cửa sổ rate-limit dùng chung mọi action.
 pub const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
-/// Max `request-otp` calls per IP per window.
+/// Số lần `request-otp` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_REQUEST_OTP_IP_MAX: u32 = 3;
-/// Max `forgot-password-otp` calls per IP per window.
+/// Số lần `forgot-password-otp` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX: u32 = 3;
-/// Max `signin` calls per IP per window.
+/// Số lần `signin` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_SIGNIN_IP_MAX: u32 = 5;
-/// Max `change-password` calls per user per window.
+/// Số lần `change-password` tối đa mỗi user mỗi cửa sổ.
 pub const RATE_LIMIT_CHANGE_PASSWORD_USER_MAX: u32 = 3;
-/// Max `change-password` calls per IP per window.
+/// Số lần `change-password` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_CHANGE_PASSWORD_IP_MAX: u32 = 10;
-/// Max `create-group` calls per user per window.
+/// Số lần `create-group` tối đa mỗi user mỗi cửa sổ.
 pub const RATE_LIMIT_CREATE_GROUP_USER_MAX: u32 = 5;
-/// Max `create-group` calls per IP per window.
+/// Số lần `create-group` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_CREATE_GROUP_IP_MAX: u32 = 20;
-/// Max `join-group` calls per user per window.
+/// Số lần `join-group` tối đa mỗi user mỗi cửa sổ.
 pub const RATE_LIMIT_JOIN_GROUP_USER_MAX: u32 = 10;
-/// Max `join-group` calls per IP per window.
+/// Số lần `join-group` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_JOIN_GROUP_IP_MAX: u32 = 30;
 
 // ---------------------------------------------------------------------------
 // Cookies
 // ---------------------------------------------------------------------------
 
-/// `max-age` for the Google OAuth state/verifier cookies in seconds (10 minutes).
+/// `max-age` cookie state/verifier OAuth Google, giây (10 phút).
 pub const OAUTH_COOKIE_MAX_AGE_SECS: i64 = 600;
 
 // ---------------------------------------------------------------------------
 // Mailer
 // ---------------------------------------------------------------------------
 
-/// Bounded queue capacity for the background email worker.
+/// Sức chứa queue của worker gửi mail nền.
 pub const MAILER_BUFFER_SIZE: usize = 128;
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+/// Số session refresh-token tối đa mỗi user (đuổi session cũ nhất trước).
+pub const MAX_SESSIONS_PER_USER: usize = 5;

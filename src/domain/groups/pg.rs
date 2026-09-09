@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub struct PostgresGroupRepository;
 
 impl PostgresGroupRepository {
+    /// Tạo repository group (stateless).
     #[must_use]
     pub const fn new() -> Self {
         Self

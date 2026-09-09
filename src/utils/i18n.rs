@@ -1,5 +1,6 @@
 use std::{collections::HashMap, hash::BuildHasher};
 
+/// Đoán ngôn ngữ (`en`/`vi`, mặc định `vi`) từ header `Accept-Language`.
 #[must_use]
 pub fn get_language_from_header(accept_language: Option<&str>) -> String {
     let Some(header) = accept_language else {
@@ -39,6 +40,7 @@ pub fn get_language_from_header(accept_language: Option<&str>) -> String {
     "vi".to_string()
 }
 
+/// Dịch message theo key + ngôn ngữ, thay `{placeholder}` từ params.
 #[must_use]
 pub fn t<S: BuildHasher>(key: &str, lang: &str, params: Option<&HashMap<&str, &str, S>>) -> String {
     let template = match lang {

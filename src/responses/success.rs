@@ -14,20 +14,24 @@ pub struct SuccessResponse<T = ()> {
 }
 
 impl<T: Serialize> SuccessResponse<T> {
+    /// Response `200 OK` kèm data.
     pub fn ok(data: T) -> Self {
         Self { success: true, message: "OK".to_string(), data: Some(data) }
     }
 
+    /// Response `200 OK` kèm data và message.
     pub fn with_message(data: T, message: impl Into<String>) -> Self {
         Self { success: true, message: message.into(), data: Some(data) }
     }
 
+    /// Response `201 Created` kèm data và message.
     pub fn created(data: T, message: impl Into<String>) -> (StatusCode, Self) {
         (StatusCode::CREATED, Self { success: true, message: message.into(), data: Some(data) })
     }
 }
 
 impl SuccessResponse<()> {
+    /// Response `200 OK` chỉ có message, không data.
     pub fn message_only(message: impl Into<String>) -> Self {
         Self { success: true, message: message.into(), data: None }
     }

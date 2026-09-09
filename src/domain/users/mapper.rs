@@ -4,6 +4,7 @@ pub struct UserMapper;
 
 impl UserMapper {
     #[must_use]
+    /// Map user entity sang response (giấu password hash).
     pub fn to_response(entity: &UserEntity) -> UserResponse {
         UserResponse {
             id: entity.id,
@@ -17,6 +18,7 @@ impl UserMapper {
         }
     }
 
+    /// Map danh sách user entity sang response.
     pub fn to_response_list(entities: &[UserEntity]) -> Vec<UserResponse> {
         entities.iter().map(Self::to_response).collect()
     }

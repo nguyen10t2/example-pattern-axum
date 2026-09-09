@@ -31,6 +31,7 @@ use crate::{
     },
 };
 
+/// Dựng routes user: nhóm public (OTP, login, OAuth) + nhóm protected sau auth.
 pub fn user_router(state: AppState) -> Router<AppState> {
     let public_routes = Router::new()
         .route("/request-otp", post(handle_request_otp))
@@ -53,6 +54,11 @@ pub fn user_router(state: AppState) -> Router<AppState> {
     public_routes.merge(protected_routes)
 }
 
+/// Gửi OTP đăng ký (giới hạn theo IP).
+///
+/// # Errors
+///
+/// Trả `TooManyRequests` khi vượt rate-limit, lỗi nghiệp vụ từ service nếu có.
 pub async fn handle_request_otp(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -67,6 +73,11 @@ pub async fn handle_request_otp(
     Ok(SuccessResponse::message_only("OTP sent successfully"))
 }
 
+/// Đăng ký user mới, trả `201 Created`.
+///
+/// # Errors
+///
+/// Trả lỗi nghiệp vụ từ service (`InvalidOtp`, email trùng, ...).
 pub async fn handle_signup(
     State(state): State<AppState>,
     ValidatedJson(body): ValidatedJson<SignUpRequest>,
@@ -75,6 +86,11 @@ pub async fn handle_signup(
     Ok(SuccessResponse::created(user, "User created successfully"))
 }
 
+/// Gửi OTP quên mật khẩu (giới hạn theo IP).
+///
+/// # Errors
+///
+/// Trả `TooManyRequests` khi vượt rate-limit.
 pub async fn handle_forgot_password_otp(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -93,6 +109,11 @@ pub async fn handle_forgot_password_otp(
     Ok(SuccessResponse::message_only("OTP sent successfully"))
 }
 
+/// Reset mật khẩu bằng OTP đã gửi qua email.
+///
+/// # Errors
+///
+/// Trả `InvalidOtp` khi OTP sai/hết hạn.
 pub async fn handle_reset_password(
     State(state): State<AppState>,
     ValidatedJson(body): ValidatedJson<ResetPasswordRequest>,
@@ -101,6 +122,11 @@ pub async fn handle_reset_password(
     Ok(SuccessResponse::message_only("Password reset successfully"))
 }
 
+/// Đăng nhập, set refresh token vào cookie `http_only`.
+///
+/// # Errors
+///
+/// Trả `TooManyRequests` khi vượt rate-limit, `InvalidCredentials` khi sai thông tin.
 pub async fn handle_signin(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -131,6 +157,11 @@ pub async fn handle_signin(
     ))
 }
 
+/// Xoay cặp token từ refresh cookie, set cookie mới.
+///
+/// # Errors
+///
+/// Trả `InvalidSession` khi thiếu cookie hoặc session hết hạn/bị thu hồi.
 pub async fn handle_refresh(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -155,6 +186,11 @@ pub async fn handle_refresh(
     ))
 }
 
+/// Đăng xuất: thu hồi session và xóa refresh cookie.
+///
+/// # Errors
+///
+/// Luôn `Ok` — sign-out là idempotent.
 pub async fn handle_signout(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -170,6 +206,11 @@ pub async fn handle_signout(
     Ok((jar, SuccessResponse::message_only("User signed out successfully")))
 }
 
+/// Bắt đầu OAuth Google: lưu state/verifier vào cookie rồi redirect sang Google.
+///
+/// # Errors
+///
+/// Luôn `Ok` — bước này chưa gọi I/O nào có thể lỗi.
 pub async fn handle_google_auth(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -195,6 +236,11 @@ pub async fn handle_google_auth(
     Ok((jar, Redirect::temporary(&auth_url)))
 }
 
+/// Xử lý callback Google: đối chiếu state, đăng nhập rồi redirect về frontend kèm token.
+///
+/// # Errors
+///
+/// Trả `Unauthorized` khi thiếu/khác state, code lỗi, hoặc Google từ chối.
 pub async fn handle_google_callback(
     State(state): State<AppState>,
     ValidatedQuery(query): ValidatedQuery<GoogleCallbackQuery>,
@@ -229,6 +275,11 @@ pub async fn handle_google_callback(
     Ok((jar, Redirect::temporary(&redirect_url)).into_response())
 }
 
+/// Lấy profile của chính mình (từ JWT).
+///
+/// # Errors
+///
+/// Trả `UserNotFound` khi user không còn tồn tại.
 pub async fn handle_get_me(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -237,6 +288,11 @@ pub async fn handle_get_me(
     Ok(SuccessResponse::with_message(user, "User found successfully"))
 }
 
+/// Cập nhật profile của chính mình.
+///
+/// # Errors
+///
+/// Trả lỗi DB khi ghi thất bại.
 pub async fn handle_update_me(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -246,6 +302,11 @@ pub async fn handle_update_me(
     Ok(SuccessResponse::with_message(user, "User updated successfully"))
 }
 
+/// Đổi mật khẩu (giới hạn theo user và IP).
+///
+/// # Errors
+///
+/// Trả `TooManyRequests` khi vượt rate-limit, `InvalidCredentials` khi sai mật khẩu cũ.
 pub async fn handle_change_password(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -272,6 +333,11 @@ pub async fn handle_change_password(
     Ok(SuccessResponse::message_only("Password changed successfully"))
 }
 
+/// Lấy user theo id.
+///
+/// # Errors
+///
+/// Trả `UserNotFound` khi id không tồn tại.
 pub async fn handle_get_user_by_id(
     State(state): State<AppState>,
     AuthUser(_): AuthUser,
@@ -281,6 +347,11 @@ pub async fn handle_get_user_by_id(
     Ok(SuccessResponse::with_message(user, "User found successfully"))
 }
 
+/// Lấy user theo email.
+///
+/// # Errors
+///
+/// Trả `UserNotFound` khi email không tồn tại.
 pub async fn handle_get_user_by_email(
     State(state): State<AppState>,
     AuthUser(_): AuthUser,

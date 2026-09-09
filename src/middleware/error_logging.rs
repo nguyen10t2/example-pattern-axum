@@ -4,6 +4,7 @@ use axum::{extract::Request, middleware::Next, response::Response};
 
 use crate::errors::AppError;
 
+/// Middleware log lỗi `AppError` (đã gắn vào response extensions) rồi chuyển tiếp response.
 pub async fn log_errors(request: Request, next: Next) -> Response {
     let response = next.run(request).await;
 

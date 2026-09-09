@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub struct PostgresSettlementRepository;
 
 impl PostgresSettlementRepository {
+    /// Tạo repository settlement (stateless).
     #[must_use]
     pub const fn new() -> Self {
         Self

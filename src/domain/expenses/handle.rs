@@ -17,6 +17,7 @@ use crate::{
     state::AppState,
 };
 
+/// Dựng routes expense (tất cả sau auth).
 pub fn expense_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/", post(handle_create_expense))
@@ -25,6 +26,11 @@ pub fn expense_router(state: AppState) -> Router<AppState> {
         .route_layer(axum::middleware::from_fn_with_state(state, crate::middleware::require_auth))
 }
 
+/// Tạo expense mới, trả `201 Created` (phải là thành viên nhóm).
+///
+/// # Errors
+///
+/// Trả `NotGroupMember` khi ngoài nhóm, lỗi validation/split từ service.
 pub async fn handle_create_expense(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -36,6 +42,11 @@ pub async fn handle_create_expense(
     Ok(SuccessResponse::created(expense, "Expense created successfully"))
 }
 
+/// Lấy expense theo id kèm shares (phải là thành viên nhóm).
+///
+/// # Errors
+///
+/// Trả `ExpenseNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_expense_by_id(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -45,6 +56,11 @@ pub async fn handle_get_expense_by_id(
     Ok(SuccessResponse::with_message(expense, "Expense found successfully"))
 }
 
+/// Liệt kê expense của nhóm có phân trang.
+///
+/// # Errors
+///
+/// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_expenses_by_group(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -57,6 +73,11 @@ pub async fn handle_get_expenses_by_group(
     Ok(SuccessResponse::with_message(expenses, "Expenses for group retrieved successfully"))
 }
 
+/// Xóa expense (người tạo hoặc admin).
+///
+/// # Errors
+///
+/// Trả `ExpenseNotFound`, `NotGroupMember` hoặc `DeletePermissionDenied`.
 pub async fn handle_delete_expense(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,

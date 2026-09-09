@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub struct PostgresUserRepository;
 
 impl PostgresUserRepository {
+    /// Tạo repository user (stateless).
     #[must_use]
     pub const fn new() -> Self {
         Self
