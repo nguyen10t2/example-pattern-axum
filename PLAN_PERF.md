@@ -24,8 +24,10 @@ Branch: `phase6-io-roundtrips` (stack trên tip Phase 5). Status: **DONE.**
 
 - [x] Rate limiter 1 Lua script (`INCR` + `EXPIRE` nếu == 1); mixed gộp 2 keys
       vào 1 script → 4 RTT còn 1, atomic, hết race rò rỉ key. `redis::Script` tự
-      fallback `EVAL`. Fail-open giữ nguyên. Không verify live được (chưa có
-      Redis local) — logic script đơn giản, chờ verify tay khi có Redis.
+      fallback `EVAL`. Fail-open giữ nguyên.
+      **Đã verify live** (Redis local): block đúng ngưỡng, TTL set ngay hit đầu,
+      mixed enforce cả 2 budgets + đếm đúng theo user khác IP (`redis_live_test`,
+      5 cases `#[ignore]`, pass hết).
 - [x] `COUNT(*) OVER()` gộp COUNT + SELECT thành 1 query cho expense và settlement
       list (2 RTT còn 1). Decode qua `FromRow::from_row` (bỏ qua cột thừa), không
       đổi signature repo.
@@ -34,7 +36,9 @@ Branch: `phase6-io-roundtrips` (stack trên tip Phase 5). Status: **DONE.**
       Trade-off đã chốt: staleness tối đa 60s.
 - [x] `CacheStore::delete_many` (Redis pipeline, backend khác loop); các vòng xóa
       session (`sign_out`, `change/reset password`, đuổi session cũ) gộp batch.
-- [x] Test: membership hit + invalidation proof, `delete_many` unit, full suite xanh.
+- [x] Test: membership hit + invalidation proof, `delete_many` unit, membership
+      roundtrip qua Redis thật, full suite xanh (live tests `#[ignore]`, suite
+      mặc định hermetic).
 
 ## Phase 7 — Alloc, hotpath, query hygiene
 
