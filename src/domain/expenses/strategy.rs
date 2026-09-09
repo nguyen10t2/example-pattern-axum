@@ -21,15 +21,25 @@ pub trait SplitStrategy: Send + Sync {
     fn validate(&self, context: &SplitContext) -> Result<(), AppError>;
 }
 
+/// Shared check for amount-based strategies: share amounts must add up to the total.
+///
+/// NOTE: `Equal` and `Exact` intentionally share this today (see strategy tests:
+/// equal split accepts any shares that sum to the total, e.g. 33/33/34).
+/// If equal split should enforce per-share equality (`total / n`), change
+/// `EqualSplitStrategy` only — do not touch this helper.
+fn validate_sum(context: &SplitContext) -> Result<(), AppError> {
+    let sum: i64 = context.shares.iter().map(|s| s.share_amount).sum();
+    if sum != context.total_amount {
+        return Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())));
+    }
+    Ok(())
+}
+
 pub struct EqualSplitStrategy;
 
 impl SplitStrategy for EqualSplitStrategy {
     fn validate(&self, context: &SplitContext) -> Result<(), AppError> {
-        let sum: i64 = context.shares.iter().map(|s| s.share_amount).sum();
-        if sum != context.total_amount {
-            return Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())));
-        }
-        Ok(())
+        validate_sum(context)
     }
 }
 
@@ -37,11 +47,7 @@ pub struct ExactSplitStrategy;
 
 impl SplitStrategy for ExactSplitStrategy {
     fn validate(&self, context: &SplitContext) -> Result<(), AppError> {
-        let sum: i64 = context.shares.iter().map(|s| s.share_amount).sum();
-        if sum != context.total_amount {
-            return Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())));
-        }
-        Ok(())
+        validate_sum(context)
     }
 }
 
