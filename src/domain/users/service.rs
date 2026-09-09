@@ -16,7 +16,7 @@ use crate::{
     },
     errors::{AppError, BusinessError, map_unique_violation},
     utils::{
-        cache::{CACHE_EXPIRATION, CacheStore, CacheStoreExt, OTP_EXPIRATION, REFRESH_TOKEN_EXPIRATION},
+        cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt, OTP_EXPIRATION, REFRESH_TOKEN_EXPIRATION},
         email::Mailer,
         hash::{hash_password, verify_password},
         jwt::JwtConfig,
@@ -28,7 +28,7 @@ use sqlx::PgPool;
 
 pub struct UserService<R: UserRepository> {
     repo: R,
-    cache: Arc<dyn CacheStore>,
+    cache: Arc<Cache>,
     argon2: Arc<Argon2<'static>>,
     jwt_config: JwtConfig,
     mailer: Mailer,
@@ -38,7 +38,7 @@ pub struct UserService<R: UserRepository> {
 impl<R: UserRepository> UserService<R> {
     pub fn new(
         repo: R,
-        cache: Arc<dyn CacheStore>,
+        cache: Arc<Cache>,
         argon2: Arc<Argon2<'static>>,
         jwt_config: JwtConfig,
         mailer: Mailer,

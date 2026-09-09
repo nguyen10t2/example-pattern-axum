@@ -31,7 +31,10 @@ use dsa::{
             repository::UserRepository,
         },
     },
-    utils::{cache::MemoryCache, jwt::JwtConfig},
+    utils::{
+        cache::{Cache, MemoryCache},
+        jwt::JwtConfig,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -540,8 +543,8 @@ pub fn test_argon2() -> Arc<Argon2<'static>> {
     Arc::new(Argon2::default())
 }
 
-pub fn test_cache() -> Arc<MemoryCache> {
-    Arc::new(MemoryCache::new())
+pub fn test_cache() -> Arc<Cache> {
+    Arc::new(Cache::Memory(MemoryCache::new()))
 }
 
 pub fn test_pool() -> sqlx::PgPool {

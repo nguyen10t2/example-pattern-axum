@@ -18,19 +18,19 @@ use crate::{
         shared::{PaginatedResponse, PaginationQuery},
     },
     errors::{AppError, BusinessError},
-    utils::cache::CacheStore,
+    utils::cache::{Cache, CacheStore},
 };
 use sqlx::PgPool;
 
 pub struct ExpenseService<ER: ExpenseRepository, GR: GroupRepository> {
     expense_repo: ER,
     group_repo: GR,
-    cache: Arc<dyn CacheStore>,
+    cache: Arc<Cache>,
     pool: PgPool,
 }
 
 impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
-    pub fn new(expense_repo: ER, group_repo: GR, cache: Arc<dyn CacheStore>, pool: PgPool) -> Self {
+    pub fn new(expense_repo: ER, group_repo: GR, cache: Arc<Cache>, pool: PgPool) -> Self {
         Self { expense_repo, group_repo, cache, pool }
     }
 

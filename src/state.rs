@@ -11,7 +11,7 @@ use crate::{
     },
     middleware::RedisRateLimiter,
     utils::{
-        cache::{CacheStore, RedisCache},
+        cache::{Cache, RedisCache},
         email::Mailer,
         jwt::JwtConfig,
         oauth::GoogleOAuthConfig,
@@ -47,7 +47,7 @@ pub struct AppState {
     >,
     pub expense_service: Arc<ExpenseService<PostgresExpenseRepository, PostgresGroupRepository>>,
     pub settlement_service: Arc<SettlementService<PostgresSettlementRepository, PostgresGroupRepository>>,
-    pub cache: Arc<dyn CacheStore>,
+    pub cache: Arc<Cache>,
     pub rate_limiter: RedisRateLimiter,
     pub jwt_config: JwtConfig,
     pub google_oauth: GoogleOAuthConfig,
@@ -75,7 +75,7 @@ impl AppState {
         let redis_config = RedisConfig::from_env();
         let connection_manager = redis_config.connect().await?;
 
-        let cache: Arc<dyn CacheStore> = Arc::new(RedisCache::new(connection_manager.clone()));
+        let cache = Arc::new(Cache::Redis(RedisCache::new(connection_manager.clone())));
         let rate_limiter = RedisRateLimiter::new(connection_manager.clone());
         let jwt_config = JwtConfig::from_env();
         let google_oauth = GoogleOAuthConfig::from_env();

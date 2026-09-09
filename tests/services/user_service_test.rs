@@ -12,8 +12,7 @@ use dsa::{
     utils::{cache::CacheStoreExt, email::Mailer, hash::hash_password, oauth::GoogleUserInfo},
 };
 
-fn create_test_user_service()
--> (UserService<MockUserRepository>, Arc<dsa::utils::cache::MemoryCache>, MockUserRepository) {
+fn create_test_user_service() -> (UserService<MockUserRepository>, Arc<dsa::utils::cache::Cache>, MockUserRepository) {
     let repo = MockUserRepository::default();
     let cache = test_cache();
     let argon2 = test_argon2();
