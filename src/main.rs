@@ -89,21 +89,38 @@ async fn main() {
 
     info!("Server running on http://{addr}");
 
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!("Failed to bind {addr}: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
+        tracing::error!("Server error: {e}");
+        std::process::exit(1);
+    }
 }
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::error!("Failed to install Ctrl+C handler: {e}");
+            std::process::exit(1);
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to install SIGTERM handler: {e}");
+                std::process::exit(1);
+            }
+        }
     };
 
     #[cfg(not(unix))]
