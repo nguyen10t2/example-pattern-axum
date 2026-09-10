@@ -120,6 +120,7 @@ fn translate_en(key: &str) -> &'static str {
         "EMAIL_NOT_VERIFIED" => "Email not verified",
         "NOT_GROUP_MEMBER" => "You are not in this group",
         "OTP_SENT" => "OTP sent",
+        "OTP_VERIFIED" => "OTP is valid",
         "USER_CREATED" => "User created successfully",
         "PASSWORD_RESET" => "Password reset successfully",
         "SIGNED_IN" => "Signed in successfully",
@@ -184,6 +185,7 @@ fn translate_vi(key: &str) -> &'static str {
         "EMAIL_NOT_VERIFIED" => "Email chưa được xác thực",
         "NOT_GROUP_MEMBER" => "Bạn không thuộc nhóm này",
         "OTP_SENT" => "Đã gửi mã OTP",
+        "OTP_VERIFIED" => "Mã OTP hợp lệ",
         "USER_CREATED" => "Tạo tài khoản thành công",
         "PASSWORD_RESET" => "Đặt lại mật khẩu thành công",
         "SIGNED_IN" => "Đăng nhập thành công",
@@ -305,6 +307,7 @@ mod tests {
     fn test_all_success_keys_resolve_both_languages() {
         let keys = [
             "OTP_SENT",
+            "OTP_VERIFIED",
             "USER_CREATED",
             "PASSWORD_RESET",
             "SIGNED_IN",
