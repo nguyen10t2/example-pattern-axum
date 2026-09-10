@@ -31,6 +31,24 @@ impl From<jsonwebtoken::errors::Error> for AppError {
     }
 }
 
+impl From<lettre::address::AddressError> for AppError {
+    fn from(err: lettre::address::AddressError) -> Self {
+        Self::System(SystemError::EmailAddress(err))
+    }
+}
+
+impl From<lettre::error::Error> for AppError {
+    fn from(err: lettre::error::Error) -> Self {
+        Self::System(SystemError::EmailBuild(err))
+    }
+}
+
+impl From<lettre::transport::smtp::Error> for AppError {
+    fn from(err: lettre::transport::smtp::Error) -> Self {
+        Self::System(SystemError::EmailDelivery(err))
+    }
+}
+
 #[derive(Serialize)]
 pub struct ErrorResponse {
     pub success: bool,

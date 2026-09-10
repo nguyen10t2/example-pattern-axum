@@ -15,6 +15,15 @@ pub enum SystemError {
     #[error("HTTP client error: {0}")]
     Reqwest(#[from] reqwest::Error),
 
+    #[error("Email address error: {0}")]
+    EmailAddress(#[from] lettre::address::AddressError),
+
+    #[error("Email build error: {0}")]
+    EmailBuild(#[from] lettre::error::Error),
+
+    #[error("Email delivery failed: {0}")]
+    EmailDelivery(#[from] lettre::transport::smtp::Error),
+
     #[error("Internal server error: {0}")]
     Internal(String),
 }

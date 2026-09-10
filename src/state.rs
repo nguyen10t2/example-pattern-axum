@@ -12,7 +12,7 @@ use crate::{
     middleware::RedisRateLimiter,
     utils::{
         cache::{Cache, RedisCache},
-        email::Mailer,
+        email::{EmailConfig, Mailer},
         jwt::JwtConfig,
         oauth::GoogleOAuthConfig,
     },
@@ -29,6 +29,8 @@ pub enum AppStateError {
     InvalidDatabaseUrl(#[from] sqlx::Error),
     #[error(transparent)]
     Redis(#[from] crate::config::RedisConnectError),
+    #[error("invalid email configuration: {0}")]
+    InvalidEmail(#[from] crate::utils::email::EmailConfigError),
 }
 
 #[derive(Clone)]
@@ -79,7 +81,9 @@ impl AppState {
         let group_repo = PostgresGroupRepository::new();
         let settlement_repo = PostgresSettlementRepository::new();
 
-        let mailer = Mailer::new(MAILER_BUFFER_SIZE);
+        let email_config = EmailConfig::from_env();
+        email_config.validate()?;
+        let mailer = Mailer::new(MAILER_BUFFER_SIZE, &email_config);
 
         let user_service = Arc::new(UserService::new(
             user_repo.clone(),

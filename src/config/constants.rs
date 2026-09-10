@@ -77,6 +77,14 @@ pub const RATE_LIMIT_CREATE_GROUP_IP_MAX: u32 = 20;
 pub const RATE_LIMIT_JOIN_GROUP_USER_MAX: u32 = 10;
 /// Số lần `join-group` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_JOIN_GROUP_IP_MAX: u32 = 30;
+/// Số lần gọi verify-otp tối đa mỗi IP mỗi cửa sổ.
+pub const RATE_LIMIT_VERIFY_OTP_IP_MAX: u32 = 10;
+/// Số lần xin OTP tối đa mỗi email mỗi cửa sổ dài (chống inbox-bomb).
+pub const RATE_LIMIT_REQUEST_OTP_EMAIL_MAX: u32 = 3;
+/// Cửa sổ cho giới hạn theo email.
+pub const RATE_LIMIT_EMAIL_WINDOW: Duration = Duration::from_secs(3600);
+/// Số lần nhập sai OTP tối đa trước khi hủy mã.
+pub const MAX_OTP_ATTEMPTS: u32 = 5;
 
 // ---------------------------------------------------------------------------
 // Cookies
@@ -91,6 +99,13 @@ pub const OAUTH_COOKIE_MAX_AGE_SECS: i64 = 600;
 
 /// Sức chứa queue của worker gửi mail nền.
 pub const MAILER_BUFFER_SIZE: usize = 128;
+
+// ---------------------------------------------------------------------------
+// Email (SMTP)
+// ---------------------------------------------------------------------------
+
+/// Timeout mỗi lần gửi SMTP, giây.
+pub const EMAIL_SMTP_TIMEOUT_SECS: u64 = 10;
 
 // ---------------------------------------------------------------------------
 // Sessions

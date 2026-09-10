@@ -11,17 +11,23 @@ use crate::{
             entity::{NewUserEntity, UpdateUserEntity},
             mapper::UserMapper,
             repository::UserRepository,
-            request::{ChangePasswordRequest, ResetPasswordRequest, SignInRequest, SignUpRequest, UpdateUserRequest},
+            request::{
+                ChangePasswordRequest, OtpPurpose, ResetPasswordRequest, SignInRequest, SignUpRequest,
+                UpdateUserRequest,
+            },
             response::{TokensResponse, UserResponse},
         },
     },
     errors::{AppError, BusinessError, map_unique_violation},
     utils::{
-        cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt, OTP_EXPIRATION, REFRESH_TOKEN_EXPIRATION},
+        cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt, REFRESH_TOKEN_EXPIRATION},
         email::Mailer,
+        email_template::OtpEmail,
         hash::{hash_password, verify_password},
+        i18n::Lang,
         jwt::JwtConfig,
         oauth::GoogleUserInfo,
+        otp,
         random::generate_otp,
     },
 };
@@ -54,19 +60,32 @@ impl<R: UserRepository> UserService<R> {
     /// # Errors
     ///
     /// Trả `UserAlreadyExists` nếu email đã có tài khoản.
-    pub async fn request_otp(&self, email: &str) -> Result<(), AppError> {
+    pub async fn request_otp(&self, email: &str, lang: Lang) -> Result<(), AppError> {
         let existing_user = self.repo.find_by_email(&self.pool, email).await?;
         if existing_user.is_some() {
             return Err(AppError::Business(BusinessError::UserAlreadyExists));
         }
 
         let otp = generate_otp();
-        let key = format!("otp:{}", email.to_lowercase());
-
-        self.cache.set(&key, &otp, OTP_EXPIRATION).await;
-        self.mailer.send_otp(email, &otp).await;
+        otp::store(&self.cache, &otp::signup_key(email), otp.clone()).await;
+        self.mailer.send(email, &OtpEmail::new(otp), lang).await;
 
         Ok(())
+    }
+
+    /// Kiểm tra OTP mà không tiêu thụ (cho FE verify sớm).
+    ///
+    /// Sai quá `MAX_OTP_ATTEMPTS` lần thì hủy mã, bắt xin lại.
+    ///
+    /// # Errors
+    ///
+    /// Trả `InvalidOtp` khi mã sai, hết hạn hoặc đã bị hủy do sai nhiều lần.
+    pub async fn verify_otp(&self, email: &str, otp: &str, purpose: OtpPurpose) -> Result<(), AppError> {
+        let key = match purpose {
+            OtpPurpose::Signup => otp::signup_key(email),
+            OtpPurpose::Reset => otp::reset_key(email),
+        };
+        otp::check(&self.cache, &key, otp).await
     }
 
     /// Tạo user mới sau khi đối chiếu OTP.
@@ -75,13 +94,8 @@ impl<R: UserRepository> UserService<R> {
     ///
     /// Trả `InvalidOtp` khi OTP sai/hết hạn, `Conflict` khi email trùng, lỗi hash/DB khi ghi.
     pub async fn sign_up(&self, data: SignUpRequest) -> Result<UserResponse, AppError> {
-        let key = format!("otp:{}", data.email.to_lowercase());
-        let cached_otp: Option<String> = self.cache.get(&key).await;
-
-        match cached_otp {
-            Some(otp) if otp == data.otp => {}
-            _ => return Err(AppError::Business(BusinessError::InvalidOtp)),
-        }
+        let key = otp::signup_key(&data.email);
+        otp::check(&self.cache, &key, &data.otp).await?;
 
         let password_hash = hash_password(&self.argon2, data.password).await?;
         let user_id = Uuid::now_v7();
@@ -388,17 +402,15 @@ impl<R: UserRepository> UserService<R> {
     /// # Errors
     ///
     /// Luôn `Ok` — không có lỗi nghiệp vụ.
-    pub async fn request_forgot_password_otp(&self, email: &str) -> Result<(), AppError> {
+    pub async fn request_forgot_password_otp(&self, email: &str, lang: Lang) -> Result<(), AppError> {
         let user = self.repo.find_by_email(&self.pool, email).await?;
         if user.is_none() {
             return Ok(()); // Prevent email enumeration
         }
 
         let otp = generate_otp();
-        let key = format!("forgot_otp:{}", email.to_lowercase());
-
-        self.cache.set(&key, &otp, OTP_EXPIRATION).await;
-        self.mailer.send_otp(email, &otp).await;
+        otp::store(&self.cache, &otp::reset_key(email), otp.clone()).await;
+        self.mailer.send(email, &OtpEmail::new(otp), lang).await;
 
         Ok(())
     }
@@ -409,13 +421,8 @@ impl<R: UserRepository> UserService<R> {
     ///
     /// Trả `InvalidOtp` khi OTP sai/hết hạn, `UserNotFound` khi email không tồn tại.
     pub async fn reset_password(&self, data: ResetPasswordRequest) -> Result<(), AppError> {
-        let key = format!("forgot_otp:{}", data.email.to_lowercase());
-        let cached_otp: Option<String> = self.cache.get(&key).await;
-
-        match cached_otp {
-            Some(otp) if otp == data.otp => {}
-            _ => return Err(AppError::Business(BusinessError::InvalidOtp)),
-        }
+        let key = otp::reset_key(&data.email);
+        otp::check(&self.cache, &key, &data.otp).await?;
 
         let user = self.repo.find_by_email(&self.pool, &data.email).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(data.email.clone())))?;

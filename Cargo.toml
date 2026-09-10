@@ -38,6 +38,8 @@ rand = "0.8"
 redis = { version = "0.29.5", features = ["tokio-comp", "tokio-rustls-comp", "connection-manager", "tls-rustls", "tls-rustls-webpki-roots"] }
 time = "0.3"
 dashmap = "6.1"
+# SMTP async qua tokio + rustls (khớp stack TLS sẵn có). Bỏ default để khỏi kéo native-tls.
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 # Hasher foldhash cho map nóng (nhanh hơn SipHash của std với map nhỏ).
 hashbrown = "0.15"
 

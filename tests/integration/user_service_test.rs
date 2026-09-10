@@ -3,13 +3,21 @@ use uuid::Uuid;
 
 use crate::common::{MockUserRepository, test_argon2, test_cache, test_jwt_config, test_pool};
 use dsa::{
+    config::constants::MAX_OTP_ATTEMPTS,
     domain::users::{
         entity::NewUserEntity,
         repository::UserRepository,
-        request::{ChangePasswordRequest, ResetPasswordRequest, SignInRequest, SignUpRequest},
+        request::{ChangePasswordRequest, OtpPurpose, ResetPasswordRequest, SignInRequest, SignUpRequest},
         service::UserService,
     },
-    utils::{cache::CacheStoreExt, email::Mailer, hash::hash_password, oauth::GoogleUserInfo},
+    utils::{
+        cache::CacheStoreExt,
+        email::{EmailConfig, Mailer},
+        hash::hash_password,
+        i18n::Lang,
+        oauth::GoogleUserInfo,
+        otp::OtpEntry,
+    },
 };
 
 fn create_test_user_service() -> (UserService<MockUserRepository>, Arc<dsa::utils::cache::Cache>, MockUserRepository) {
@@ -18,7 +26,14 @@ fn create_test_user_service() -> (UserService<MockUserRepository>, Arc<dsa::util
     let argon2 = test_argon2();
     let jwt_config = test_jwt_config();
 
-    let service = UserService::new(repo.clone(), cache.clone(), argon2, jwt_config, Mailer::new(8), test_pool());
+    let service = UserService::new(
+        repo.clone(),
+        cache.clone(),
+        argon2,
+        jwt_config,
+        Mailer::new(8, &EmailConfig::disabled()),
+        test_pool(),
+    );
     (service, cache, repo)
 }
 
@@ -27,10 +42,11 @@ async fn test_user_signup_and_signin_flow() {
     let (service, cache, _) = create_test_user_service();
 
     // 1. Request OTP
-    service.request_otp("alice@example.com").await.unwrap();
+    service.request_otp("alice@example.com", Lang::Vi).await.unwrap();
 
     // Check OTP in cache
-    let otp: String = cache.get("otp:alice@example.com").await.unwrap();
+    let entry: OtpEntry = cache.get("otp:alice@example.com").await.unwrap();
+    let otp = entry.code.clone();
 
     // 2. Sign Up with valid OTP
     let user = service
@@ -128,8 +144,9 @@ async fn test_change_and_reset_password() {
         .unwrap();
 
     // Forgot password flow
-    service.request_forgot_password_otp("bob@example.com").await.unwrap();
-    let forgot_otp: String = cache.get("forgot_otp:bob@example.com").await.unwrap();
+    service.request_forgot_password_otp("bob@example.com", Lang::Vi).await.unwrap();
+    let forgot_entry: OtpEntry = cache.get("forgot_otp:bob@example.com").await.unwrap();
+    let forgot_otp = forgot_entry.code;
 
     service
         .reset_password(ResetPasswordRequest {
@@ -165,4 +182,62 @@ async fn test_google_oauth_signin() {
     // Sign in again with same google account should link and succeed
     let tokens2 = service.sign_in_with_google(google_user).await.unwrap();
     assert!(!tokens2.access_token.is_empty());
+}
+
+#[tokio::test]
+async fn test_verify_otp_success_failure_and_purpose_isolation() {
+    let (service, cache, _) = create_test_user_service();
+    service.request_otp("verify@example.com", Lang::Vi).await.unwrap();
+    let entry: OtpEntry = cache.get("otp:verify@example.com").await.unwrap();
+
+    // Sai mã thì lỗi nhưng chưa hủy.
+    assert!(service.verify_otp("verify@example.com", "000000", OtpPurpose::Signup).await.is_err());
+    // Mã signup không dùng được cho flow reset (key riêng).
+    assert!(service.verify_otp("verify@example.com", &entry.code, OtpPurpose::Reset).await.is_err());
+    // Mã đúng, đúng flow thì pass và KHÔNG tiêu thụ (signup sau vẫn được).
+    assert!(service.verify_otp("verify@example.com", &entry.code, OtpPurpose::Signup).await.is_ok());
+    assert!(
+        service
+            .sign_up(SignUpRequest {
+                email: "verify@example.com".to_string(),
+                full_name: "Verify User".to_string(),
+                password: "password123".to_string(),
+                otp: entry.code,
+            })
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn test_otp_invalidated_after_max_attempts() {
+    let (service, cache, _) = create_test_user_service();
+    service.request_otp("cap@example.com", Lang::Vi).await.unwrap();
+    let entry: OtpEntry = cache.get("otp:cap@example.com").await.unwrap();
+
+    for _ in 0..MAX_OTP_ATTEMPTS {
+        assert!(service.verify_otp("cap@example.com", "000000", OtpPurpose::Signup).await.is_err());
+    }
+
+    // Mã đúng cũng rớt vì entry đã bị xóa sau đủ số lần sai.
+    assert!(service.verify_otp("cap@example.com", &entry.code, OtpPurpose::Signup).await.is_err());
+    assert!(cache.get::<OtpEntry>("otp:cap@example.com").await.is_none());
+}
+
+#[tokio::test]
+async fn test_signup_attempts_share_counter_with_verify() {
+    let (service, cache, _) = create_test_user_service();
+    service.request_otp("shared@example.com", Lang::Vi).await.unwrap();
+    let entry: OtpEntry = cache.get("otp:shared@example.com").await.unwrap();
+
+    // Sai 2 lần qua signup, đúng qua verify vẫn pass (chung 1 counter, chưa tới hạn).
+    let bad = SignUpRequest {
+        email: "shared@example.com".to_string(),
+        full_name: "Shared User".to_string(),
+        password: "password123".to_string(),
+        otp: "000000".to_string(),
+    };
+    assert!(service.sign_up(bad.clone()).await.is_err());
+    assert!(service.sign_up(bad).await.is_err());
+    assert!(service.verify_otp("shared@example.com", &entry.code, OtpPurpose::Signup).await.is_ok());
 }
