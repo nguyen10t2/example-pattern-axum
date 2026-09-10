@@ -16,9 +16,10 @@ use crate::{
         response::{GroupMemberResponse, GroupResponse, GroupSummaryResponse},
     },
     errors::{AppError, BusinessError},
-    middleware::{AuthUser, ValidatedJson, ValidatedPath, extract_client_ip},
+    middleware::{AuthUser, RequestLang, ValidatedJson, ValidatedPath, extract_client_ip},
     responses::SuccessResponse,
     state::AppState,
+    utils::i18n::t_simple,
 };
 
 /// Dựng routes nhóm (tất cả sau auth).
@@ -39,10 +40,11 @@ pub fn group_router(state: AppState) -> Router<AppState> {
 /// Trả lỗi DB khi đọc thất bại.
 pub async fn handle_get_all_groups(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
 ) -> Result<SuccessResponse<Vec<GroupResponse>>, AppError> {
     let groups = state.group_service.find_all_by_user(user_id).await?;
-    Ok(SuccessResponse::with_message(groups, "Groups retrieved successfully"))
+    Ok(SuccessResponse::with_message(groups, t_simple("GROUPS_RETRIEVED", lang)))
 }
 
 /// Tạo nhóm mới, trả `201 Created` (giới hạn theo user và IP).
@@ -52,6 +54,7 @@ pub async fn handle_get_all_groups(
 /// Trả `TooManyRequests` khi vượt rate-limit.
 pub async fn handle_create_group(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     headers: HeaderMap,
     ValidatedJson(body): ValidatedJson<CreateGroupRequest>,
@@ -73,7 +76,7 @@ pub async fn handle_create_group(
     }
 
     let group = state.group_service.create(body, user_id).await?;
-    Ok(SuccessResponse::created(group, "Group created successfully"))
+    Ok(SuccessResponse::created(group, t_simple("GROUP_CREATED", lang)))
 }
 
 /// Vào nhóm bằng invite code (giới hạn theo user và IP).
@@ -83,6 +86,7 @@ pub async fn handle_create_group(
 /// Trả `TooManyRequests` khi vượt rate-limit, `InvalidInviteCode` khi code sai.
 pub async fn handle_join_group(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     headers: HeaderMap,
     ValidatedJson(body): ValidatedJson<JoinGroupRequest>,
@@ -104,7 +108,7 @@ pub async fn handle_join_group(
     }
 
     let group = state.group_service.join_by_invite_code(&body.code, user_id).await?;
-    Ok(SuccessResponse::with_message(group, "Joined group successfully"))
+    Ok(SuccessResponse::with_message(group, t_simple("GROUP_JOINED", lang)))
 }
 
 /// Lấy chi tiết nhóm (phải là thành viên).
@@ -114,11 +118,12 @@ pub async fn handle_join_group(
 /// Trả `NotGroupMember` khi ngoài nhóm, `GroupNotFound` khi nhóm không tồn tại.
 pub async fn handle_get_group_by_id(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<GroupResponse>, AppError> {
     let group = state.group_service.find_by_id(id, Some(user_id)).await?;
-    Ok(SuccessResponse::with_message(group, "Group found successfully"))
+    Ok(SuccessResponse::with_message(group, t_simple("GROUP_FOUND", lang)))
 }
 
 /// Lấy tổng hợp nhóm: số dư + gợi ý trả nợ.
@@ -128,11 +133,12 @@ pub async fn handle_get_group_by_id(
 /// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_group_summary(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<GroupSummaryResponse>, AppError> {
     let summary = state.group_service.get_group_summary(id, user_id).await?;
-    Ok(SuccessResponse::with_message(summary, "Group summary retrieved successfully"))
+    Ok(SuccessResponse::with_message(summary, t_simple("GROUP_SUMMARY_RETRIEVED", lang)))
 }
 
 /// Thêm thành viên vào nhóm (chỉ admin), trả `201 Created`.
@@ -142,12 +148,13 @@ pub async fn handle_get_group_summary(
 /// Trả `AdminRequired` khi không phải admin, `Conflict` khi đã trong nhóm.
 pub async fn handle_add_group_member(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
     ValidatedJson(body): ValidatedJson<AddMemberRequest>,
 ) -> Result<(StatusCode, SuccessResponse<GroupMemberResponse>), AppError> {
     let member = state.group_service.add_member(id, body, user_id).await?;
-    Ok(SuccessResponse::created(member, "Member added successfully"))
+    Ok(SuccessResponse::created(member, t_simple("MEMBER_ADDED", lang)))
 }
 
 /// Liệt kê thành viên nhóm.
@@ -157,11 +164,12 @@ pub async fn handle_add_group_member(
 /// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_group_members(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<Vec<GroupMemberResponse>>, AppError> {
     let members = state.group_service.get_members(id, user_id).await?;
-    Ok(SuccessResponse::with_message(members, "Members retrieved successfully"))
+    Ok(SuccessResponse::with_message(members, t_simple("MEMBERS_RETRIEVED", lang)))
 }
 
 /// Xóa nhóm (chỉ admin).
@@ -171,9 +179,10 @@ pub async fn handle_get_group_members(
 /// Trả `AdminRequired` khi không phải admin, `GroupNotFound` khi nhóm không tồn tại.
 pub async fn handle_delete_group(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<()>, AppError> {
     state.group_service.delete_group(id, user_id).await?;
-    Ok(SuccessResponse::message_only("Group deleted successfully"))
+    Ok(SuccessResponse::message_only(t_simple("GROUP_DELETED", lang)))
 }

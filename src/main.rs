@@ -12,7 +12,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use dsa::{
     domain::{expenses::expense_router, groups::group_router, settlements::settlement_router, users::user_router},
-    middleware::{log_errors, security_headers},
+    middleware::{localize, log_errors, security_headers},
     state::AppState,
 };
 
@@ -74,6 +74,7 @@ async fn main() {
         .layer(cors)
         .layer(from_fn(security_headers))
         .layer(from_fn(log_errors))
+        .layer(from_fn(localize))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {
