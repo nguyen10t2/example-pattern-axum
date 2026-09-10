@@ -11,6 +11,15 @@ pub enum Lang {
 }
 
 impl Lang {
+    /// Mã ngôn ngữ cho thuộc tính HTML (`vi`/`en`).
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::Vi => "vi",
+        }
+    }
+
     /// Đoán ngôn ngữ từ header `Accept-Language` (ưu tiên q cao nhất, fallback `Vi`).
     #[must_use]
     pub fn from_accept_language(accept_language: Option<&str>) -> Self {
@@ -135,6 +144,12 @@ fn translate_en(key: &str) -> &'static str {
         "SETTLEMENT_FOUND" => "Settlement found",
         "SETTLEMENTS_RETRIEVED" => "Settlements for group retrieved successfully",
         "SETTLEMENT_CANCELLED" => "Settlement cancelled successfully",
+        "EMAIL_OTP_SUBJECT" => "Your SplitDebt verification code",
+        "EMAIL_OTP_HELLO" => "Hello,",
+        "EMAIL_OTP_INTRO" => "Use the code below to continue:",
+        "EMAIL_OTP_EXPIRES" => "This code expires in 2 minutes.",
+        "EMAIL_OTP_IGNORE" => "If you didn't request this, please ignore this email.",
+        "EMAIL_FOOTER_TEAM" => "The SplitDebt Team",
         _ => "INTERNAL_SERVER_ERROR",
     }
 }
@@ -193,6 +208,12 @@ fn translate_vi(key: &str) -> &'static str {
         "SETTLEMENT_FOUND" => "Tìm thấy khoản trả nợ",
         "SETTLEMENTS_RETRIEVED" => "Lấy danh sách trả nợ thành công",
         "SETTLEMENT_CANCELLED" => "Hủy trả nợ thành công",
+        "EMAIL_OTP_SUBJECT" => "Mã xác thực SplitDebt",
+        "EMAIL_OTP_HELLO" => "Xin chào,",
+        "EMAIL_OTP_INTRO" => "Dùng mã dưới đây để tiếp tục:",
+        "EMAIL_OTP_EXPIRES" => "Mã hết hạn sau 2 phút.",
+        "EMAIL_OTP_IGNORE" => "Nếu bạn không yêu cầu, hãy bỏ qua email này.",
+        "EMAIL_FOOTER_TEAM" => "Đội ngũ SplitDebt",
         _ => "INTERNAL_SERVER_ERROR",
     }
 }
@@ -308,6 +329,12 @@ mod tests {
             "SETTLEMENT_FOUND",
             "SETTLEMENTS_RETRIEVED",
             "SETTLEMENT_CANCELLED",
+            "EMAIL_OTP_SUBJECT",
+            "EMAIL_OTP_HELLO",
+            "EMAIL_OTP_INTRO",
+            "EMAIL_OTP_EXPIRES",
+            "EMAIL_OTP_IGNORE",
+            "EMAIL_FOOTER_TEAM",
         ];
         for key in keys {
             assert_ne!(t(key, Lang::En, None::<&HashMap<&str, &str>>), "INTERNAL_SERVER_ERROR", "{key}");

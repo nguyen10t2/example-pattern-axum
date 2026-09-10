@@ -71,7 +71,7 @@ pub async fn handle_request_otp(
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
-    state.user_service.request_otp(&body.email).await?;
+    state.user_service.request_otp(&body.email, lang).await?;
     Ok(SuccessResponse::message_only(t_simple("OTP_SENT", lang)))
 }
 
@@ -109,7 +109,7 @@ pub async fn handle_forgot_password_otp(
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
-    state.user_service.request_forgot_password_otp(&body.email).await?;
+    state.user_service.request_forgot_password_otp(&body.email, lang).await?;
     Ok(SuccessResponse::message_only(t_simple("OTP_SENT", lang)))
 }
 

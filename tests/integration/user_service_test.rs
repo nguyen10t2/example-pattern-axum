@@ -9,7 +9,13 @@ use dsa::{
         request::{ChangePasswordRequest, ResetPasswordRequest, SignInRequest, SignUpRequest},
         service::UserService,
     },
-    utils::{cache::CacheStoreExt, email::Mailer, hash::hash_password, oauth::GoogleUserInfo},
+    utils::{
+        cache::CacheStoreExt,
+        email::{EmailConfig, Mailer},
+        hash::hash_password,
+        i18n::Lang,
+        oauth::GoogleUserInfo,
+    },
 };
 
 fn create_test_user_service() -> (UserService<MockUserRepository>, Arc<dsa::utils::cache::Cache>, MockUserRepository) {
@@ -18,7 +24,14 @@ fn create_test_user_service() -> (UserService<MockUserRepository>, Arc<dsa::util
     let argon2 = test_argon2();
     let jwt_config = test_jwt_config();
 
-    let service = UserService::new(repo.clone(), cache.clone(), argon2, jwt_config, Mailer::new(8), test_pool());
+    let service = UserService::new(
+        repo.clone(),
+        cache.clone(),
+        argon2,
+        jwt_config,
+        Mailer::new(8, &EmailConfig::disabled()),
+        test_pool(),
+    );
     (service, cache, repo)
 }
 
@@ -27,7 +40,7 @@ async fn test_user_signup_and_signin_flow() {
     let (service, cache, _) = create_test_user_service();
 
     // 1. Request OTP
-    service.request_otp("alice@example.com").await.unwrap();
+    service.request_otp("alice@example.com", Lang::Vi).await.unwrap();
 
     // Check OTP in cache
     let otp: String = cache.get("otp:alice@example.com").await.unwrap();
@@ -128,7 +141,7 @@ async fn test_change_and_reset_password() {
         .unwrap();
 
     // Forgot password flow
-    service.request_forgot_password_otp("bob@example.com").await.unwrap();
+    service.request_forgot_password_otp("bob@example.com", Lang::Vi).await.unwrap();
     let forgot_otp: String = cache.get("forgot_otp:bob@example.com").await.unwrap();
 
     service

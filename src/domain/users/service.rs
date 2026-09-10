@@ -19,7 +19,9 @@ use crate::{
     utils::{
         cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt, OTP_EXPIRATION, REFRESH_TOKEN_EXPIRATION},
         email::Mailer,
+        email_template::OtpEmail,
         hash::{hash_password, verify_password},
+        i18n::Lang,
         jwt::JwtConfig,
         oauth::GoogleUserInfo,
         random::generate_otp,
@@ -54,7 +56,7 @@ impl<R: UserRepository> UserService<R> {
     /// # Errors
     ///
     /// Trả `UserAlreadyExists` nếu email đã có tài khoản.
-    pub async fn request_otp(&self, email: &str) -> Result<(), AppError> {
+    pub async fn request_otp(&self, email: &str, lang: Lang) -> Result<(), AppError> {
         let existing_user = self.repo.find_by_email(&self.pool, email).await?;
         if existing_user.is_some() {
             return Err(AppError::Business(BusinessError::UserAlreadyExists));
@@ -64,7 +66,7 @@ impl<R: UserRepository> UserService<R> {
         let key = format!("otp:{}", email.to_lowercase());
 
         self.cache.set(&key, &otp, OTP_EXPIRATION).await;
-        self.mailer.send_otp(email, &otp).await;
+        self.mailer.send(email, &OtpEmail::new(otp), lang).await;
 
         Ok(())
     }
@@ -388,7 +390,7 @@ impl<R: UserRepository> UserService<R> {
     /// # Errors
     ///
     /// Luôn `Ok` — không có lỗi nghiệp vụ.
-    pub async fn request_forgot_password_otp(&self, email: &str) -> Result<(), AppError> {
+    pub async fn request_forgot_password_otp(&self, email: &str, lang: Lang) -> Result<(), AppError> {
         let user = self.repo.find_by_email(&self.pool, email).await?;
         if user.is_none() {
             return Ok(()); // Prevent email enumeration
@@ -398,7 +400,7 @@ impl<R: UserRepository> UserService<R> {
         let key = format!("forgot_otp:{}", email.to_lowercase());
 
         self.cache.set(&key, &otp, OTP_EXPIRATION).await;
-        self.mailer.send_otp(email, &otp).await;
+        self.mailer.send(email, &OtpEmail::new(otp), lang).await;
 
         Ok(())
     }

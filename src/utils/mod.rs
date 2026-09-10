@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod email;
+pub mod email_template;
 pub mod hash;
 pub mod i18n;
 pub mod jwt;
