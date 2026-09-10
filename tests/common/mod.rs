@@ -560,7 +560,6 @@ pub fn test_cache() -> Arc<Cache> {
 }
 
 pub fn test_pool() -> sqlx::PgPool {
-    sqlx::postgres::PgPoolOptions::new()
-        .connect_lazy("postgres://localhost/dsa_test")
-        .expect("failed to create lazy test pool")
+    let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/dsa_test".to_string());
+    sqlx::postgres::PgPoolOptions::new().connect_lazy(&url).expect("failed to create lazy test pool")
 }

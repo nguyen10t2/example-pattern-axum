@@ -114,7 +114,7 @@ impl BusinessError {
 
     /// Map lỗi nghiệp vụ sang mã lỗi trả về client (đồng bộ với i18n).
     #[must_use]
-    pub const fn error_code(&self) -> &str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::Unauthorized => error_codes::UNAUTHORIZED,
             Self::Forbidden => error_codes::FORBIDDEN,

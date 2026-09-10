@@ -12,9 +12,10 @@ use crate::{
         shared::{PaginatedResponse, PaginationQuery},
     },
     errors::AppError,
-    middleware::{AuthUser, ValidatedJson, ValidatedPath, ValidatedQuery},
+    middleware::{AuthUser, RequestLang, ValidatedJson, ValidatedPath, ValidatedQuery},
     responses::SuccessResponse,
     state::AppState,
+    utils::i18n::t_simple,
 };
 
 /// Dựng routes settlement (tất cả sau auth).
@@ -33,11 +34,12 @@ pub fn settlement_router(state: AppState) -> Router<AppState> {
 /// Trả `NotGroupMember`/`UserNotInGroup` khi sai thành viên.
 pub async fn handle_create_settlement(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedJson(body): ValidatedJson<CreateSettlementRequest>,
 ) -> Result<(StatusCode, SuccessResponse<SettlementResponse>), AppError> {
     let settlement = state.settlement_service.create(body, user_id).await?;
-    Ok(SuccessResponse::created(settlement, "Settlement recorded successfully"))
+    Ok(SuccessResponse::created(settlement, t_simple("SETTLEMENT_RECORDED", lang)))
 }
 
 /// Lấy settlement theo id (phải là thành viên nhóm).
@@ -47,11 +49,12 @@ pub async fn handle_create_settlement(
 /// Trả `SettlementNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_settlement_by_id(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<SettlementResponse>, AppError> {
     let settlement = state.settlement_service.find_by_id(id, user_id).await?;
-    Ok(SuccessResponse::with_message(settlement, "Settlement found successfully"))
+    Ok(SuccessResponse::with_message(settlement, t_simple("SETTLEMENT_FOUND", lang)))
 }
 
 /// Liệt kê settlements của nhóm có phân trang.
@@ -61,12 +64,13 @@ pub async fn handle_get_settlement_by_id(
 /// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_settlements_by_group(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(group_id): ValidatedPath<Uuid>,
     ValidatedQuery(query): ValidatedQuery<PaginationQuery>,
 ) -> Result<SuccessResponse<PaginatedResponse<SettlementResponse>>, AppError> {
     let settlements = state.settlement_service.find_by_group(group_id, user_id, query).await?;
-    Ok(SuccessResponse::with_message(settlements, "Settlements for group retrieved successfully"))
+    Ok(SuccessResponse::with_message(settlements, t_simple("SETTLEMENTS_RETRIEVED", lang)))
 }
 
 /// Hủy settlement (2 bên tham gia hoặc admin).
@@ -76,9 +80,10 @@ pub async fn handle_get_settlements_by_group(
 /// Trả `SettlementNotFound`, `NotGroupMember` hoặc `DeletePermissionDenied`.
 pub async fn handle_cancel_settlement(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<()>, AppError> {
     state.settlement_service.cancel_settlement(id, user_id).await?;
-    Ok(SuccessResponse::message_only("Settlement cancelled successfully"))
+    Ok(SuccessResponse::message_only(t_simple("SETTLEMENT_CANCELLED", lang)))
 }

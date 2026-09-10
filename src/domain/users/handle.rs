@@ -22,11 +22,12 @@ use crate::{
     },
     domain::users::response::{AuthResponse, UserResponse},
     errors::{AppError, BusinessError},
-    middleware::{AuthUser, ValidatedJson, ValidatedPath, ValidatedQuery, extract_client_ip},
+    middleware::{AuthUser, RequestLang, ValidatedJson, ValidatedPath, ValidatedQuery, extract_client_ip},
     responses::SuccessResponse,
     state::AppState,
     utils::{
         cache::REFRESH_TOKEN_EXPIRATION,
+        i18n::t_simple,
         oauth::{generate_code_verifier, generate_state},
     },
 };
@@ -61,6 +62,7 @@ pub fn user_router(state: AppState) -> Router<AppState> {
 /// Trả `TooManyRequests` khi vượt rate-limit, lỗi nghiệp vụ từ service nếu có.
 pub async fn handle_request_otp(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     headers: HeaderMap,
     ValidatedJson(body): ValidatedJson<RequestOtpRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
@@ -70,7 +72,7 @@ pub async fn handle_request_otp(
     }
 
     state.user_service.request_otp(&body.email).await?;
-    Ok(SuccessResponse::message_only("OTP sent successfully"))
+    Ok(SuccessResponse::message_only(t_simple("OTP_SENT", lang)))
 }
 
 /// Đăng ký user mới, trả `201 Created`.
@@ -80,10 +82,11 @@ pub async fn handle_request_otp(
 /// Trả lỗi nghiệp vụ từ service (`InvalidOtp`, email trùng, ...).
 pub async fn handle_signup(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     ValidatedJson(body): ValidatedJson<SignUpRequest>,
 ) -> Result<(StatusCode, SuccessResponse<UserResponse>), AppError> {
     let user = state.user_service.sign_up(body).await?;
-    Ok(SuccessResponse::created(user, "User created successfully"))
+    Ok(SuccessResponse::created(user, t_simple("USER_CREATED", lang)))
 }
 
 /// Gửi OTP quên mật khẩu (giới hạn theo IP).
@@ -93,6 +96,7 @@ pub async fn handle_signup(
 /// Trả `TooManyRequests` khi vượt rate-limit.
 pub async fn handle_forgot_password_otp(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     headers: HeaderMap,
     ValidatedJson(body): ValidatedJson<ForgotPasswordOtpRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
@@ -106,7 +110,7 @@ pub async fn handle_forgot_password_otp(
     }
 
     state.user_service.request_forgot_password_otp(&body.email).await?;
-    Ok(SuccessResponse::message_only("OTP sent successfully"))
+    Ok(SuccessResponse::message_only(t_simple("OTP_SENT", lang)))
 }
 
 /// Reset mật khẩu bằng OTP đã gửi qua email.
@@ -116,10 +120,11 @@ pub async fn handle_forgot_password_otp(
 /// Trả `InvalidOtp` khi OTP sai/hết hạn.
 pub async fn handle_reset_password(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     ValidatedJson(body): ValidatedJson<ResetPasswordRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
     state.user_service.reset_password(body).await?;
-    Ok(SuccessResponse::message_only("Password reset successfully"))
+    Ok(SuccessResponse::message_only(t_simple("PASSWORD_RESET", lang)))
 }
 
 /// Đăng nhập, set refresh token vào cookie `http_only`.
@@ -129,6 +134,7 @@ pub async fn handle_reset_password(
 /// Trả `TooManyRequests` khi vượt rate-limit, `InvalidCredentials` khi sai thông tin.
 pub async fn handle_signin(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     headers: HeaderMap,
     jar: CookieJar,
     ValidatedJson(body): ValidatedJson<SignInRequest>,
@@ -150,10 +156,7 @@ pub async fn handle_signin(
     let jar = jar.add(refresh_cookie);
     Ok((
         jar,
-        SuccessResponse::with_message(
-            AuthResponse { access_token: tokens.access_token },
-            "User signed in successfully",
-        ),
+        SuccessResponse::with_message(AuthResponse { access_token: tokens.access_token }, t_simple("SIGNED_IN", lang)),
     ))
 }
 
@@ -164,6 +167,7 @@ pub async fn handle_signin(
 /// Trả `InvalidSession` khi thiếu cookie hoặc session hết hạn/bị thu hồi.
 pub async fn handle_refresh(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     jar: CookieJar,
 ) -> Result<(CookieJar, SuccessResponse<AuthResponse>), AppError> {
     let refresh_token = jar.get("refreshCookie").map(Cookie::value);
@@ -181,7 +185,7 @@ pub async fn handle_refresh(
         jar,
         SuccessResponse::with_message(
             AuthResponse { access_token: tokens.access_token },
-            "Token refreshed successfully",
+            t_simple("TOKEN_REFRESHED", lang),
         ),
     ))
 }
@@ -193,6 +197,7 @@ pub async fn handle_refresh(
 /// Luôn `Ok` — sign-out là idempotent.
 pub async fn handle_signout(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     jar: CookieJar,
 ) -> Result<(CookieJar, SuccessResponse<()>), AppError> {
     let refresh_token = jar.get("refreshCookie").map(Cookie::value);
@@ -203,7 +208,7 @@ pub async fn handle_signout(
     remove_cookie.set_max_age(time::Duration::seconds(0));
 
     let jar = jar.add(remove_cookie);
-    Ok((jar, SuccessResponse::message_only("User signed out successfully")))
+    Ok((jar, SuccessResponse::message_only(t_simple("SIGNED_OUT", lang))))
 }
 
 /// Bắt đầu OAuth Google: lưu state/verifier vào cookie rồi redirect sang Google.
@@ -282,10 +287,11 @@ pub async fn handle_google_callback(
 /// Trả `UserNotFound` khi user không còn tồn tại.
 pub async fn handle_get_me(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
 ) -> Result<SuccessResponse<UserResponse>, AppError> {
     let user = state.user_service.find_by_id(user_id).await?;
-    Ok(SuccessResponse::with_message(user, "User found successfully"))
+    Ok(SuccessResponse::with_message(user, t_simple("USER_FOUND", lang)))
 }
 
 /// Cập nhật profile của chính mình.
@@ -295,11 +301,12 @@ pub async fn handle_get_me(
 /// Trả lỗi DB khi ghi thất bại.
 pub async fn handle_update_me(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedJson(body): ValidatedJson<UpdateUserRequest>,
 ) -> Result<SuccessResponse<UserResponse>, AppError> {
     let user = state.user_service.update(user_id, body).await?;
-    Ok(SuccessResponse::with_message(user, "User updated successfully"))
+    Ok(SuccessResponse::with_message(user, t_simple("USER_UPDATED", lang)))
 }
 
 /// Đổi mật khẩu (giới hạn theo user và IP).
@@ -309,6 +316,7 @@ pub async fn handle_update_me(
 /// Trả `TooManyRequests` khi vượt rate-limit, `InvalidCredentials` khi sai mật khẩu cũ.
 pub async fn handle_change_password(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     headers: HeaderMap,
     ValidatedJson(body): ValidatedJson<ChangePasswordRequest>,
@@ -330,7 +338,7 @@ pub async fn handle_change_password(
     }
 
     state.user_service.change_password(user_id, body).await?;
-    Ok(SuccessResponse::message_only("Password changed successfully"))
+    Ok(SuccessResponse::message_only(t_simple("PASSWORD_CHANGED", lang)))
 }
 
 /// Lấy user theo id.
@@ -340,11 +348,12 @@ pub async fn handle_change_password(
 /// Trả `UserNotFound` khi id không tồn tại.
 pub async fn handle_get_user_by_id(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(_): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<UserResponse>, AppError> {
     let user = state.user_service.find_by_id(id).await?;
-    Ok(SuccessResponse::with_message(user, "User found successfully"))
+    Ok(SuccessResponse::with_message(user, t_simple("USER_FOUND", lang)))
 }
 
 /// Lấy user theo email.
@@ -354,9 +363,10 @@ pub async fn handle_get_user_by_id(
 /// Trả `UserNotFound` khi email không tồn tại.
 pub async fn handle_get_user_by_email(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(_): AuthUser,
     ValidatedPath(email): ValidatedPath<String>,
 ) -> Result<SuccessResponse<UserResponse>, AppError> {
     let user = state.user_service.find_by_email(&email).await?;
-    Ok(SuccessResponse::with_message(user, "User found successfully"))
+    Ok(SuccessResponse::with_message(user, t_simple("USER_FOUND", lang)))
 }

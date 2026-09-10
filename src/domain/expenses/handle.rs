@@ -12,9 +12,10 @@ use crate::{
         shared::{PaginatedResponse, PaginationQuery},
     },
     errors::AppError,
-    middleware::{AuthUser, ValidatedJson, ValidatedPath, ValidatedQuery},
+    middleware::{AuthUser, RequestLang, ValidatedJson, ValidatedPath, ValidatedQuery},
     responses::SuccessResponse,
     state::AppState,
+    utils::i18n::t_simple,
 };
 
 /// Dựng routes expense (tất cả sau auth).
@@ -33,13 +34,14 @@ pub fn expense_router(state: AppState) -> Router<AppState> {
 /// Trả `NotGroupMember` khi ngoài nhóm, lỗi validation/split từ service.
 pub async fn handle_create_expense(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedJson(body): ValidatedJson<CreateExpenseRequest>,
 ) -> Result<(StatusCode, SuccessResponse<ExpenseResponse>), AppError> {
     state.group_service.ensure_membership(body.group_id, user_id).await?;
 
     let expense = state.expense_service.create(body, user_id).await?;
-    Ok(SuccessResponse::created(expense, "Expense created successfully"))
+    Ok(SuccessResponse::created(expense, t_simple("EXPENSE_CREATED", lang)))
 }
 
 /// Lấy expense theo id kèm shares (phải là thành viên nhóm).
@@ -49,11 +51,12 @@ pub async fn handle_create_expense(
 /// Trả `ExpenseNotFound` khi id không tồn tại, `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_expense_by_id(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<ExpenseResponse>, AppError> {
     let expense = state.expense_service.find_by_id(id, Some(user_id)).await?;
-    Ok(SuccessResponse::with_message(expense, "Expense found successfully"))
+    Ok(SuccessResponse::with_message(expense, t_simple("EXPENSE_FOUND", lang)))
 }
 
 /// Liệt kê expense của nhóm có phân trang.
@@ -63,6 +66,7 @@ pub async fn handle_get_expense_by_id(
 /// Trả `NotGroupMember` khi ngoài nhóm.
 pub async fn handle_get_expenses_by_group(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(group_id): ValidatedPath<Uuid>,
     ValidatedQuery(query): ValidatedQuery<PaginationQuery>,
@@ -70,7 +74,7 @@ pub async fn handle_get_expenses_by_group(
     state.group_service.ensure_membership(group_id, user_id).await?;
 
     let expenses = state.expense_service.find_by_group(group_id, user_id, query).await?;
-    Ok(SuccessResponse::with_message(expenses, "Expenses for group retrieved successfully"))
+    Ok(SuccessResponse::with_message(expenses, t_simple("EXPENSES_RETRIEVED", lang)))
 }
 
 /// Xóa expense (người tạo hoặc admin).
@@ -80,9 +84,10 @@ pub async fn handle_get_expenses_by_group(
 /// Trả `ExpenseNotFound`, `NotGroupMember` hoặc `DeletePermissionDenied`.
 pub async fn handle_delete_expense(
     State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<()>, AppError> {
     state.expense_service.delete_expense(id, user_id).await?;
-    Ok(SuccessResponse::message_only("Expense deleted successfully"))
+    Ok(SuccessResponse::message_only(t_simple("EXPENSE_DELETED", lang)))
 }

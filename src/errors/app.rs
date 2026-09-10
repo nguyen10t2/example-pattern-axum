@@ -7,7 +7,8 @@ use axum::{
 };
 use serde::Serialize;
 
-use super::{BusinessError, SystemError};
+use super::{BusinessError, SystemError, error_codes};
+use crate::utils::i18n::{Lang, t};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -33,39 +34,60 @@ impl From<jsonwebtoken::errors::Error> for AppError {
 #[derive(Serialize)]
 pub struct ErrorResponse {
     pub success: bool,
+    pub code: String,
     pub message: String,
+}
+
+/// Mã lỗi ổn định cho client (`error_codes`), không đổi theo ngôn ngữ.
+#[must_use]
+pub const fn error_code(err: &AppError) -> &'static str {
+    match err {
+        AppError::Business(err) => err.error_code(),
+        AppError::System(_) => error_codes::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// Message hiển thị theo ngôn ngữ. Message tự do (validator...) giữ nguyên không dịch.
+#[must_use]
+pub fn error_message(err: &AppError, lang: Lang) -> String {
+    match err {
+        AppError::Business(err) => {
+            let code = err.error_code();
+            match err {
+                BusinessError::UserNotInGroup(user_id) => {
+                    let mut params = std::collections::HashMap::new();
+                    params.insert("userId", user_id.as_str());
+                    t(code, lang, Some(&params))
+                }
+                BusinessError::BadRequest(msg)
+                | BusinessError::NotFound(msg)
+                | BusinessError::Conflict(msg)
+                | BusinessError::ValidationError(msg) => msg.clone(),
+                _ => t(code, lang, None::<&std::collections::HashMap<&str, &str>>),
+            }
+        }
+        AppError::System(_) => {
+            t(error_codes::INTERNAL_SERVER_ERROR, lang, None::<&std::collections::HashMap<&str, &str>>)
+        }
+    }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message, err) = match &self {
-            Self::Business(err) => {
-                let code = err.error_code();
-                let msg = match err {
-                    BusinessError::UserNotInGroup(user_id) => {
-                        let mut params = std::collections::HashMap::new();
-                        params.insert("userId", user_id.as_str());
-                        crate::utils::i18n::t(code, "vi", Some(&params))
-                    }
-                    BusinessError::BadRequest(msg)
-                    | BusinessError::NotFound(msg)
-                    | BusinessError::Conflict(msg)
-                    | BusinessError::ValidationError(msg) => msg.clone(),
-                    _ => crate::utils::i18n::t(code, "vi", None::<&std::collections::HashMap<&str, &str>>),
-                };
-                (err.status_code(), msg, None)
-            }
-            Self::System(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                crate::utils::i18n::t("INTERNAL_SERVER_ERROR", "vi", None::<&std::collections::HashMap<&str, &str>>),
-                Some(self),
-            ),
+        // Ngôn ngữ mặc định (vi); middleware `localize` dựng lại body theo
+        // `Accept-Language` khi client yêu cầu ngôn ngữ khác.
+        let lang = Lang::Vi;
+        let status = match &self {
+            Self::Business(err) => err.status_code(),
+            Self::System(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
+        let code = error_code(&self).to_string();
+        let message = error_message(&self, lang);
 
-        let mut response = (status, Json(ErrorResponse { success: false, message })).into_response();
-        if let Some(err) = err {
-            response.extensions_mut().insert(Arc::new(err));
-        }
+        let mut response = (status, Json(ErrorResponse { success: false, code, message })).into_response();
+        // Luôn gắn error để middleware `log_errors` (log) và `localize` (dịch lại
+        // khi khác ngôn ngữ mặc định) dùng — kể cả lỗi 4xx.
+        response.extensions_mut().insert(Arc::new(self));
         response
     }
 }
