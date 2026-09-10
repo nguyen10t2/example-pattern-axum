@@ -14,6 +14,23 @@ pub struct RequestOtpRequest {
     pub email: String,
 }
 
+/// OTP thuộc flow nào (2 loại mã độc lập theo key cache riêng).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OtpPurpose {
+    Signup,
+    Reset,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate)]
+pub struct VerifyOtpRequest {
+    #[validate(email)]
+    pub email: String,
+    #[validate(length(min = 6, max = 6))]
+    pub otp: String,
+    pub purpose: OtpPurpose,
+}
+
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct SignUpRequest {
     #[validate(email)]

@@ -13,12 +13,13 @@ use uuid::Uuid;
 use crate::{
     config::constants::{
         DEFAULT_FRONTEND_URL, OAUTH_COOKIE_MAX_AGE_SECS, RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,
-        RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_REQUEST_OTP_IP_MAX,
-        RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW,
+        RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_EMAIL_WINDOW, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX,
+        RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_SIGNIN_IP_MAX,
+        RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW,
     },
     domain::users::request::{
         ChangePasswordRequest, ForgotPasswordOtpRequest, GoogleCallbackQuery, RequestOtpRequest, ResetPasswordRequest,
-        SignInRequest, SignUpRequest, UpdateUserRequest,
+        SignInRequest, SignUpRequest, UpdateUserRequest, VerifyOtpRequest,
     },
     domain::users::response::{AuthResponse, UserResponse},
     errors::{AppError, BusinessError},
@@ -36,6 +37,7 @@ use crate::{
 pub fn user_router(state: AppState) -> Router<AppState> {
     let public_routes = Router::new()
         .route("/request-otp", post(handle_request_otp))
+        .route("/verify-otp", post(handle_verify_otp))
         .route("/signup", post(handle_signup))
         .route("/forgot-password/otp", post(handle_forgot_password_otp))
         .route("/forgot-password/reset", post(handle_reset_password))
@@ -70,9 +72,36 @@ pub async fn handle_request_otp(
     if !state.rate_limiter.check_ip_limit("request-otp", &ip, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_WINDOW).await {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
+    if !state
+        .rate_limiter
+        .check_email_limit("request-otp", &body.email, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_EMAIL_WINDOW)
+        .await
+    {
+        return Err(AppError::Business(BusinessError::TooManyRequests));
+    }
 
     state.user_service.request_otp(&body.email, lang).await?;
     Ok(SuccessResponse::message_only(t_simple("OTP_SENT", lang)))
+}
+
+/// Kiểm tra OTP mà không tiêu thụ (cho FE verify sớm trước khi nhập tiếp).
+///
+/// # Errors
+///
+/// Trả `TooManyRequests` khi vượt rate-limit, `InvalidOtp` khi mã sai/hết hạn/bị hủy.
+pub async fn handle_verify_otp(
+    State(state): State<AppState>,
+    RequestLang(lang): RequestLang,
+    headers: HeaderMap,
+    ValidatedJson(body): ValidatedJson<VerifyOtpRequest>,
+) -> Result<SuccessResponse<bool>, AppError> {
+    let ip = extract_client_ip(&headers);
+    if !state.rate_limiter.check_ip_limit("verify-otp", &ip, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW).await {
+        return Err(AppError::Business(BusinessError::TooManyRequests));
+    }
+
+    state.user_service.verify_otp(&body.email, &body.otp, body.purpose).await?;
+    Ok(SuccessResponse::with_message(true, t_simple("OTP_VERIFIED", lang)))
 }
 
 /// Đăng ký user mới, trả `201 Created`.
@@ -104,6 +133,18 @@ pub async fn handle_forgot_password_otp(
     if !state
         .rate_limiter
         .check_ip_limit("forgot-password-otp", &ip, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_WINDOW)
+        .await
+    {
+        return Err(AppError::Business(BusinessError::TooManyRequests));
+    }
+    if !state
+        .rate_limiter
+        .check_email_limit(
+            "forgot-password-otp",
+            &body.email,
+            RATE_LIMIT_REQUEST_OTP_EMAIL_MAX,
+            RATE_LIMIT_EMAIL_WINDOW,
+        )
         .await
     {
         return Err(AppError::Business(BusinessError::TooManyRequests));

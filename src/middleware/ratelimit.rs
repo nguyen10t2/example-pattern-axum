@@ -68,6 +68,12 @@ impl RedisRateLimiter {
         self.check_rate_limit(&key, max_requests, duration).await
     }
 
+    /// Rate limits by email address (anti inbox-bombing cho endpoint xin OTP).
+    pub async fn check_email_limit(&self, action: &str, email: &str, max_requests: u32, duration: Duration) -> bool {
+        let key = format!("ratelimit:{action}:email:{}", email.to_lowercase());
+        self.check_rate_limit(&key, max_requests, duration).await
+    }
+
     /// Rate limits specifically by Authenticated User ID (prevents rotating IPs with proxy/VPN)
     pub async fn check_user_limit(&self, action: &str, user_id: Uuid, max_requests: u32, duration: Duration) -> bool {
         let key = format!("ratelimit:{action}:user:{user_id}");
