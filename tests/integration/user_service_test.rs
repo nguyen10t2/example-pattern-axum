@@ -241,3 +241,68 @@ async fn test_signup_attempts_share_counter_with_verify() {
     assert!(service.sign_up(bad).await.is_err());
     assert!(service.verify_otp("shared@example.com", &entry.code, OtpPurpose::Signup).await.is_ok());
 }
+
+async fn seed_user_for_reset(repo: &MockUserRepository, email: &str) {
+    let hash = hash_password(&test_argon2(), "oldpass123".to_string()).await.unwrap();
+    repo.create(
+        &test_pool(),
+        &NewUserEntity {
+            id: Uuid::now_v7(),
+            full_name: "Reset User".to_string(),
+            email: email.to_string(),
+            email_verified: true,
+            password_hash: Some(hash),
+            google_id: None,
+            avatar_url: None,
+            phone: None,
+            phone_verified: false,
+            preferred_currency: dsa::domain::Currency::VND,
+            is_active: true,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn test_verify_otp_reset_purpose_success_and_isolation() {
+    let (service, cache, repo) = create_test_user_service();
+    seed_user_for_reset(&repo, "reset-verify@example.com").await;
+
+    service.request_forgot_password_otp("reset-verify@example.com", Lang::Vi).await.unwrap();
+    let entry: OtpEntry = cache.get("forgot_otp:reset-verify@example.com").await.unwrap();
+
+    // Sai mã thì lỗi nhưng chưa hủy.
+    assert!(service.verify_otp("reset-verify@example.com", "000000", OtpPurpose::Reset).await.is_err());
+    // Mã reset không dùng được cho flow signup (key riêng).
+    assert!(service.verify_otp("reset-verify@example.com", &entry.code, OtpPurpose::Signup).await.is_err());
+    // Đúng mã đúng flow thì pass và KHÔNG tiêu thụ (reset sau vẫn được).
+    assert!(service.verify_otp("reset-verify@example.com", &entry.code, OtpPurpose::Reset).await.is_ok());
+    assert!(
+        service
+            .reset_password(ResetPasswordRequest {
+                email: "reset-verify@example.com".to_string(),
+                otp: entry.code,
+                new_password: "newpassword123".to_string(),
+            })
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn test_reset_otp_invalidated_after_max_attempts() {
+    let (service, cache, repo) = create_test_user_service();
+    seed_user_for_reset(&repo, "reset-cap@example.com").await;
+
+    service.request_forgot_password_otp("reset-cap@example.com", Lang::Vi).await.unwrap();
+    let entry: OtpEntry = cache.get("forgot_otp:reset-cap@example.com").await.unwrap();
+
+    for _ in 0..MAX_OTP_ATTEMPTS {
+        assert!(service.verify_otp("reset-cap@example.com", "000000", OtpPurpose::Reset).await.is_err());
+    }
+
+    // Mã đúng cũng rớt vì entry đã bị xóa sau đủ số lần sai.
+    assert!(service.verify_otp("reset-cap@example.com", &entry.code, OtpPurpose::Reset).await.is_err());
+    assert!(cache.get::<OtpEntry>("forgot_otp:reset-cap@example.com").await.is_none());
+}
