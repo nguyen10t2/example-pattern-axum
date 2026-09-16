@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{
     domain::{GroupRole, groups::repository::GroupRepository},
     errors::{AppError, BusinessError},
-    utils::cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt},
+    utils::cache::{CACHE_EXPIRATION, Cache, CacheStoreExt, group_members_key},
 };
 
 /// Membership rút gọn lưu cache — đủ cho authorize, nhẹ hơn full row `GroupMemberWithUser`.
@@ -20,10 +20,6 @@ use crate::{
 pub struct MemberEntry {
     pub user_id: Uuid,
     pub role: GroupRole,
-}
-
-fn cache_key(group_id: Uuid) -> String {
-    format!("group:members:{group_id}")
 }
 
 /// Lấy membership nhóm, ưu tiên cache; miss thì query rồi nạp lại cache.
@@ -37,19 +33,22 @@ pub async fn member_entries<GR: GroupRepository>(
     repo: &GR,
     group_id: Uuid,
 ) -> Result<Vec<MemberEntry>, AppError> {
-    let key = cache_key(group_id);
-    if let Some(cached) = cache.get::<Vec<MemberEntry>>(&key).await {
+    let key = group_members_key(group_id);
+    if let Some(cached) = cache.get_best_effort::<Vec<MemberEntry>>(&key).await {
         return Ok(cached);
     }
     let members = repo.find_members(pool, group_id).await?;
     let entries: Vec<MemberEntry> = members.iter().map(|m| MemberEntry { user_id: m.user_id, role: m.role }).collect();
-    cache.set(&key, &entries, CACHE_EXPIRATION).await;
+    cache.set_best_effort(&key, &entries, CACHE_EXPIRATION).await;
     Ok(entries)
 }
 
 /// Xóa cache membership — gọi ở mọi điểm mutate members (add/remove member, delete group).
+///
+/// Best-effort (không critical): Redis lỗi thì warn và stale tối đa bằng TTL.
+/// Để `async` vì xóa Redis là I/O mạng thật.
 pub async fn invalidate_member_cache(cache: &Cache, group_id: Uuid) {
-    cache.delete(&cache_key(group_id)).await;
+    cache.delete_best_effort(&group_members_key(group_id)).await;
 }
 
 /// Chặn nếu user không phải thành viên nhóm (bản cache-first).

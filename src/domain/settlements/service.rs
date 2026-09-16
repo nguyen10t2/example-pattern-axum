@@ -17,7 +17,7 @@ use crate::{
         shared::{PaginatedResponse, PaginationQuery},
     },
     errors::{AppError, BusinessError},
-    utils::cache::{Cache, CacheStore},
+    utils::cache::{Cache, CacheStoreExt, group_summary_key},
 };
 use sqlx::PgPool;
 
@@ -67,8 +67,8 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
 
         let settlement = self.settlement_repo.create(&self.pool, &new_settlement).await?;
 
-        // Invalidate group summary cache
-        self.cache.delete(&format!("group_summary:{}", data.group_id)).await;
+        // Invalidate group summary cache (best-effort, không critical)
+        self.cache.delete_best_effort(&group_summary_key(data.group_id)).await;
 
         info!(
             settlement_id = %settlement.id,
@@ -144,7 +144,7 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         }
 
         self.settlement_repo.soft_delete(&self.pool, id).await?;
-        self.cache.delete(&format!("group_summary:{}", settlement.group_id)).await;
+        self.cache.delete_best_effort(&group_summary_key(settlement.group_id)).await;
 
         info!(settlement_id = %id, deleted_by = %current_user_id, "Settlement cancelled");
         Ok(())
