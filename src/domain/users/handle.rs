@@ -7,15 +7,16 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
+use std::sync::LazyLock;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{
     config::constants::{
-        DEFAULT_FRONTEND_URL, OAUTH_COOKIE_MAX_AGE_SECS, RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,
-        RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_EMAIL_WINDOW, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX,
-        RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_SIGNIN_IP_MAX,
-        RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW,
+        DEFAULT_COOKIE_SECURE, DEFAULT_FRONTEND_URL, OAUTH_COOKIE_MAX_AGE_SECS, OAUTH_SUCCESS_QUERY,
+        RATE_LIMIT_CHANGE_PASSWORD_IP_MAX, RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_EMAIL_WINDOW,
+        RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_REQUEST_OTP_IP_MAX,
+        RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW, REFRESH_COOKIE_NAME,
     },
     domain::users::request::{
         ChangePasswordRequest, ForgotPasswordOtpRequest, GoogleCallbackQuery, RequestOtpRequest, ResetPasswordRequest,
@@ -32,6 +33,38 @@ use crate::{
         oauth::{generate_code_verifier, generate_state},
     },
 };
+
+/// Gắn cờ `Secure` cho cookie khi `COOKIE_SECURE=true|1` (bắt buộc ở production HTTPS).
+/// Đọc một lần lúc boot (static) vì env không đổi lúc runtime.
+static COOKIE_SECURE: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("COOKIE_SECURE").is_ok_and(|v| v.eq_ignore_ascii_case("true") || v == "1") || DEFAULT_COOKIE_SECURE
+});
+
+/// Dựng cookie refresh chuẩn (`HttpOnly` + `SameSite=Strict` + `Secure` theo env).
+///
+/// Gom 3 điểm dựng rời rạc (signin/refresh/callback) về một chỗ để không lệch
+/// attribute. Sync vì chỉ dựng struct trong RAM, không có I/O.
+fn build_refresh_cookie(refresh_token: String) -> Cookie<'static> {
+    let mut cookie = Cookie::new(REFRESH_COOKIE_NAME, refresh_token);
+    cookie.set_path("/");
+    cookie.set_http_only(true);
+    cookie.set_secure(*COOKIE_SECURE);
+    cookie.set_same_site(SameSite::Strict);
+    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
+    cookie.set_expires(expires);
+    cookie
+}
+
+/// Dựng cookie xóa refresh (cùng name/path/secure để browser match đúng entry).
+///
+/// Sync vì chỉ dựng struct trong RAM, không có I/O.
+fn build_remove_refresh_cookie() -> Cookie<'static> {
+    let mut cookie = Cookie::new(REFRESH_COOKIE_NAME, "");
+    cookie.set_path("/");
+    cookie.set_secure(*COOKIE_SECURE);
+    cookie.set_max_age(time::Duration::seconds(0));
+    cookie
+}
 
 /// Dựng routes user: nhóm public (OTP, login, OAuth) + nhóm protected sau auth.
 pub fn user_router(state: AppState) -> Router<AppState> {
@@ -187,14 +220,7 @@ pub async fn handle_signin(
 
     let tokens = state.user_service.sign_in(body).await?;
 
-    let mut refresh_cookie = Cookie::new("refreshCookie", tokens.refresh_token);
-    refresh_cookie.set_path("/");
-    refresh_cookie.set_http_only(true);
-    refresh_cookie.set_same_site(SameSite::Strict);
-    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
-    refresh_cookie.set_expires(expires);
-
-    let jar = jar.add(refresh_cookie);
+    let jar = jar.add(build_refresh_cookie(tokens.refresh_token));
     Ok((
         jar,
         SuccessResponse::with_message(AuthResponse { access_token: tokens.access_token }, t_simple("SIGNED_IN", lang)),
@@ -211,17 +237,10 @@ pub async fn handle_refresh(
     RequestLang(lang): RequestLang,
     jar: CookieJar,
 ) -> Result<(CookieJar, SuccessResponse<AuthResponse>), AppError> {
-    let refresh_token = jar.get("refreshCookie").map(Cookie::value);
+    let refresh_token = jar.get(REFRESH_COOKIE_NAME).map(Cookie::value);
     let tokens = state.user_service.refresh(refresh_token).await?;
 
-    let mut refresh_cookie = Cookie::new("refreshCookie", tokens.refresh_token);
-    refresh_cookie.set_path("/");
-    refresh_cookie.set_http_only(true);
-    refresh_cookie.set_same_site(SameSite::Strict);
-    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
-    refresh_cookie.set_expires(expires);
-
-    let jar = jar.add(refresh_cookie);
+    let jar = jar.add(build_refresh_cookie(tokens.refresh_token));
     Ok((
         jar,
         SuccessResponse::with_message(
@@ -241,14 +260,10 @@ pub async fn handle_signout(
     RequestLang(lang): RequestLang,
     jar: CookieJar,
 ) -> Result<(CookieJar, SuccessResponse<()>), AppError> {
-    let refresh_token = jar.get("refreshCookie").map(Cookie::value);
+    let refresh_token = jar.get(REFRESH_COOKIE_NAME).map(Cookie::value);
     state.user_service.sign_out(refresh_token).await?;
 
-    let mut remove_cookie = Cookie::new("refreshCookie", "");
-    remove_cookie.set_path("/");
-    remove_cookie.set_max_age(time::Duration::seconds(0));
-
-    let jar = jar.add(remove_cookie);
+    let jar = jar.add(build_remove_refresh_cookie());
     Ok((jar, SuccessResponse::message_only(t_simple("SIGNED_OUT", lang))))
 }
 
@@ -282,7 +297,11 @@ pub async fn handle_google_auth(
     Ok((jar, Redirect::temporary(&auth_url)))
 }
 
-/// Xử lý callback Google: đối chiếu state, đăng nhập rồi redirect về frontend kèm token.
+/// Xử lý callback Google: đối chiếu state, đăng nhập rồi redirect về frontend.
+///
+/// Access token KHÔNG đi qua URL (tránh lộ qua log/history/referer): backend chỉ
+/// set refresh cookie rồi redirect với flag `OAUTH_SUCCESS_QUERY`, frontend tự gọi
+/// `POST /refresh` (cookie tự gửi) để lấy access token.
 ///
 /// # Errors
 ///
@@ -300,23 +319,20 @@ pub async fn handle_google_callback(
         return Err(AppError::Business(BusinessError::Unauthorized));
     }
 
+    // TODO(oauth-code-exchange): `code` đang được dùng thẳng làm access token cho
+    // userinfo — thiếu bước exchange code→token ở `oauth2.googleapis.com/token`
+    // (kèm `code_verifier` PKCE trong cookie). Google login sẽ 401 cho tới khi
+    // bước này được implement + test (ngoài phạm vi milestone hardening).
     let google_user = state.google_oauth.fetch_user_info(&code).await?;
     let tokens = state.user_service.sign_in_with_google(google_user).await?;
 
-    let mut refresh_cookie = Cookie::new("refreshCookie", tokens.refresh_token);
-    refresh_cookie.set_path("/");
-    refresh_cookie.set_http_only(true);
-    refresh_cookie.set_same_site(SameSite::Strict);
-    let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
-    refresh_cookie.set_expires(expires);
-
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| DEFAULT_FRONTEND_URL.to_string());
-    let redirect_url = format!("{}/login?token={}", frontend_url, tokens.access_token);
+    let redirect_url = format!("{frontend_url}/login?{OAUTH_SUCCESS_QUERY}");
 
     let jar = jar
         .remove(Cookie::from("google_oauth_state"))
         .remove(Cookie::from("google_oauth_code_verifier"))
-        .add(refresh_cookie);
+        .add(build_refresh_cookie(tokens.refresh_token));
 
     Ok((jar, Redirect::temporary(&redirect_url)).into_response())
 }

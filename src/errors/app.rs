@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use axum::{
     Json,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
@@ -22,6 +21,12 @@ pub enum AppError {
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
         Self::System(SystemError::Database(err))
+    }
+}
+
+impl From<crate::utils::cache::CacheError> for AppError {
+    fn from(err: crate::utils::cache::CacheError) -> Self {
+        Self::System(SystemError::Cache(err))
     }
 }
 
@@ -61,6 +66,7 @@ pub struct ErrorResponse {
 pub const fn error_code(err: &AppError) -> &'static str {
     match err {
         AppError::Business(err) => err.error_code(),
+        AppError::System(SystemError::Cache(_)) => error_codes::SERVICE_UNAVAILABLE,
         AppError::System(_) => error_codes::INTERNAL_SERVER_ERROR,
     }
 }
@@ -97,7 +103,7 @@ impl IntoResponse for AppError {
         let lang = Lang::Vi;
         let status = match &self {
             Self::Business(err) => err.status_code(),
-            Self::System(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::System(err) => err.status_code(),
         };
         let code = error_code(&self).to_string();
         let message = error_message(&self, lang);

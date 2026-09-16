@@ -113,3 +113,51 @@ pub const EMAIL_SMTP_TIMEOUT_SECS: u64 = 10;
 
 /// Số session refresh-token tối đa mỗi user (đuổi session cũ nhất trước).
 pub const MAX_SESSIONS_PER_USER: usize = 5;
+
+// ---------------------------------------------------------------------------
+// Cache key prefixes (single source of truth cho mọi key Redis)
+// ---------------------------------------------------------------------------
+
+/// Prefix key refresh-token: `refreshToken:{jti} -> subject`.
+pub const REFRESH_TOKEN_KEY_PREFIX: &str = "refreshToken:";
+/// Prefix key danh sách session: `sessions:{subject} -> JSON Vec<jti>`.
+pub const SESSION_KEY_PREFIX: &str = "sessions:";
+/// Prefix key cache profile user: `user:{id} -> UserResponse`.
+pub const USER_CACHE_KEY_PREFIX: &str = "user:";
+/// Prefix key cache tổng hợp nhóm: `group_summary:{id} -> GroupSummaryResponse`.
+pub const GROUP_SUMMARY_KEY_PREFIX: &str = "group_summary:";
+/// Prefix key cache membership nhóm: `group:members:{id} -> Vec<MemberEntry>`.
+pub const GROUP_MEMBERS_KEY_PREFIX: &str = "group:members:";
+/// Prefix key OTP đăng ký: `otp:{email} -> OtpEntry`.
+pub const OTP_KEY_PREFIX: &str = "otp:";
+/// Prefix key OTP quên mật khẩu: `forgot_otp:{email} -> OtpEntry`.
+pub const FORGOT_OTP_KEY_PREFIX: &str = "forgot_otp:";
+
+// ---------------------------------------------------------------------------
+// Cookies
+// ---------------------------------------------------------------------------
+
+/// Tên cookie chứa refresh token.
+pub const REFRESH_COOKIE_NAME: &str = "refreshCookie";
+/// Gắn cờ `Secure` cho cookie khi thiếu `COOKIE_SECURE` (mặc định dev HTTP).
+pub const DEFAULT_COOKIE_SECURE: bool = false;
+
+// ---------------------------------------------------------------------------
+// JWT hardening
+// ---------------------------------------------------------------------------
+
+/// Độ dài tối thiểu của `JWT_SECRET` ở production (byte). Ngắn hơn thì boot fail.
+/// 32 byte = 256 bit, vừa khít ngưỡng brute-force cho HS256.
+pub const MIN_JWT_SECRET_LEN: usize = 32;
+/// Dung sai lệch đồng hồ khi verify `exp`/`iat`, giây.
+pub const JWT_LEEWAY_SECS: u64 = 30;
+
+// ---------------------------------------------------------------------------
+// OAuth
+// ---------------------------------------------------------------------------
+
+/// Query đánh dấu OAuth thành công trên redirect về frontend.
+///
+/// Frontend thấy flag này thì tự gọi `POST /refresh` (cookie đã có) để lấy
+/// access token — access token KHÔNG bao giờ đi qua URL (tránh lộ qua log/history/referer).
+pub const OAUTH_SUCCESS_QUERY: &str = "google=success";

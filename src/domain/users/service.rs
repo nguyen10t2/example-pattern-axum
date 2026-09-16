@@ -20,7 +20,11 @@ use crate::{
     },
     errors::{AppError, BusinessError, map_unique_violation},
     utils::{
-        cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt, REFRESH_TOKEN_EXPIRATION},
+        cache::{
+            CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt, NewRefreshSession, REFRESH_TOKEN_EXPIRATION,
+            RefreshRotation, RevokeRefreshSession, RotationOutcome, refresh_token_key, session_list_key,
+            user_profile_key,
+        },
         email::Mailer,
         email_template::OtpEmail,
         hash::{hash_password, verify_password},
@@ -67,7 +71,7 @@ impl<R: UserRepository> UserService<R> {
         }
 
         let otp = generate_otp();
-        otp::store(&self.cache, &otp::signup_key(email), otp.clone()).await;
+        otp::store(&self.cache, &otp::signup_key(email), otp.clone()).await?;
         self.mailer.send(email, &OtpEmail::new(otp), lang).await;
 
         Ok(())
@@ -120,7 +124,7 @@ impl<R: UserRepository> UserService<R> {
             .await
             .map_err(|err| map_unique_violation(err, &[("email", &new_user.email)]))?;
 
-        self.cache.delete(&key).await;
+        self.cache.delete(&key).await?;
 
         info!(email = %created_user.email, user_id = %created_user.id, "User signed up");
         Ok(UserMapper::to_response(created_user))
@@ -221,29 +225,31 @@ impl<R: UserRepository> UserService<R> {
         Ok(tokens)
     }
 
-    /// Đăng xuất: thu hồi refresh token khỏi cache (idempotent, token lạ thì bỏ qua).
+    /// Đăng xuất: thu hồi refresh token khỏi cache (idempotent với token lạ/hết hạn).
+    ///
+    /// Để `async` vì thu hồi session là I/O Redis thật.
     ///
     /// # Errors
     ///
-    /// Luôn `Ok` — không có lỗi nghiệp vụ.
+    /// Trả lỗi hệ thống (cache unavailable → 503) khi Redis lỗi — fail-closed,
+    /// không được báo "đã đăng xuất" giả trong khi session vẫn sống.
     pub async fn sign_out(&self, refresh_token: Option<&str>) -> Result<(), AppError> {
         let Some(token) = refresh_token else {
             return Ok(());
         };
 
         if let Ok(claims) = self.jwt_config.verify_refresh_token(token) {
-            let refresh_key = format!("refreshToken:{}", claims.jti);
-            let user_key = format!("user:{}", claims.sub);
-            let session_key = format!("sessions:{}", claims.sub);
-
-            let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
-            let updated_sessions: Vec<String> = active_sessions.into_iter().filter(|jti| jti != &claims.jti).collect();
-
-            if updated_sessions.is_empty() {
-                self.cache.delete_many(&[refresh_key, user_key, session_key]).await;
-            } else {
-                self.cache.delete_many(&[refresh_key, user_key]).await;
-                self.cache.set(&session_key, &updated_sessions, REFRESH_TOKEN_EXPIRATION).await;
+            let refresh_key = refresh_token_key(&claims.jti);
+            let session_key = session_list_key(&claims.sub);
+            let revoke = RevokeRefreshSession {
+                key: &refresh_key,
+                session_key: &session_key,
+                jti: &claims.jti,
+                ttl_secs: REFRESH_TOKEN_EXPIRATION,
+            };
+            self.cache.revoke_refresh_session(&revoke).await?;
+            if let Ok(user_id) = Uuid::parse_str(&claims.sub) {
+                self.cache.delete_best_effort(&user_profile_key(user_id)).await;
             }
         }
 
@@ -252,9 +258,16 @@ impl<R: UserRepository> UserService<R> {
 
     /// Xoay refresh token: cấp cặp mới, thu hồi token cũ (chống replay).
     ///
+    /// Rotation chạy nguyên tử trong cache backend (1 round trip). Chữ ký đúng
+    /// nhưng key đã mất (replay sau khi xoay hoặc dùng token đã revoke) thì
+    /// revoke cả family rồi mới báo lỗi — token đánh cắp không dùng lại được.
+    ///
+    /// Để `async` vì rotation + revoke là I/O Redis thật.
+    ///
     /// # Errors
     ///
-    /// Trả `InvalidSession` khi thiếu token, token hết hạn hoặc đã bị thu hồi.
+    /// Trả `InvalidSession` khi thiếu token, token hết hạn, đã bị thu hồi hoặc replay.
+    /// Trả lỗi hệ thống (cache unavailable → 503) khi Redis lỗi — fail-closed.
     pub async fn refresh(&self, old_refresh_token: Option<&str>) -> Result<TokensResponse, AppError> {
         let Some(token) = old_refresh_token else {
             return Err(AppError::Business(BusinessError::InvalidSession));
@@ -265,31 +278,49 @@ impl<R: UserRepository> UserService<R> {
             .verify_refresh_token(token)
             .map_err(|_| AppError::Business(BusinessError::InvalidSession))?;
 
-        let old_key = format!("refreshToken:{}", claims.jti);
-        let cached_user_id: Option<String> = self.cache.get(&old_key).await;
-        if cached_user_id.is_none() {
-            return Err(AppError::Business(BusinessError::InvalidSession));
-        }
-
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::Business(BusinessError::InvalidSession))?;
 
         let new_jti = Uuid::now_v7().to_string();
-        let new_key = format!("refreshToken:{new_jti}");
-
-        let session_key = format!("sessions:{}", claims.sub);
-        let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
-
-        let mut updated_sessions: Vec<String> = active_sessions.into_iter().filter(|jti| jti != &claims.jti).collect();
-        updated_sessions.push(new_jti.clone());
-
+        // Ký trước, xoay sau: xoay lỗi (503) thì session cũ còn nguyên, client retry được.
         let new_access_token = self.jwt_config.gen_access_token(user_id)?;
         let new_refresh_token = self.jwt_config.gen_refresh_token(user_id, &new_jti)?;
 
-        self.cache.delete(&old_key).await;
-        self.cache.set(&new_key, &claims.sub, REFRESH_TOKEN_EXPIRATION).await;
-        self.cache.set(&session_key, &updated_sessions, REFRESH_TOKEN_EXPIRATION).await;
+        let old_key = refresh_token_key(&claims.jti);
+        let new_key = refresh_token_key(&new_jti);
+        let session_key = session_list_key(&claims.sub);
+        let rotation = RefreshRotation {
+            old_key: &old_key,
+            new_key: &new_key,
+            session_key: &session_key,
+            subject: &claims.sub,
+            old_jti: &claims.jti,
+            new_jti: &new_jti,
+            ttl_secs: REFRESH_TOKEN_EXPIRATION,
+        };
+
+        if self.cache.rotate_refresh_token(&rotation).await? == RotationOutcome::Stale {
+            self.revoke_family(&claims.sub).await?;
+            return Err(AppError::Business(BusinessError::InvalidSession));
+        }
 
         Ok(TokensResponse { access_token: new_access_token, refresh_token: new_refresh_token })
+    }
+
+    /// Thu hồi toàn bộ sessions của subject (dùng khi phát hiện replay refresh token).
+    ///
+    /// Để `async` vì đọc + xóa Redis là I/O mạng thật.
+    ///
+    /// # Errors
+    ///
+    /// Trả lỗi hệ thống (cache unavailable → 503) khi Redis lỗi — fail-closed:
+    /// không revoke được thì không được báo `InvalidSession` nhẹ nhàng.
+    async fn revoke_family(&self, subject: &str) -> Result<(), AppError> {
+        let session_key = session_list_key(subject);
+        let active_sessions: Vec<String> = self.cache.get(&session_key).await?.unwrap_or_default();
+        let mut gone: Vec<String> = active_sessions.into_iter().map(|jti| refresh_token_key(&jti)).collect();
+        gone.push(session_key);
+        self.cache.delete_many(&gone).await?;
+        Ok(())
     }
 
     /// Lấy user theo id, ưu tiên cache 1 phút.
@@ -298,8 +329,8 @@ impl<R: UserRepository> UserService<R> {
     ///
     /// Trả `UserNotFound` khi id không tồn tại.
     pub async fn find_by_id(&self, id: Uuid) -> Result<UserResponse, AppError> {
-        let key = format!("user:{id}");
-        if let Some(cached) = self.cache.get::<UserResponse>(&key).await {
+        let key = user_profile_key(id);
+        if let Some(cached) = self.cache.get_best_effort::<UserResponse>(&key).await {
             return Ok(cached);
         }
 
@@ -307,7 +338,7 @@ impl<R: UserRepository> UserService<R> {
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(id.to_string())))?;
 
         let response = UserMapper::to_response(user);
-        self.cache.set(&key, &response, CACHE_EXPIRATION).await;
+        self.cache.set_best_effort(&key, &response, CACHE_EXPIRATION).await;
 
         Ok(response)
     }
@@ -340,8 +371,8 @@ impl<R: UserRepository> UserService<R> {
         let updated_user = self.repo.update(&self.pool, id, &update_entity).await?;
         let response = UserMapper::to_response(updated_user);
 
-        let key = format!("user:{id}");
-        self.cache.set(&key, &response, CACHE_EXPIRATION).await;
+        let key = user_profile_key(id);
+        self.cache.set_best_effort(&key, &response, CACHE_EXPIRATION).await;
 
         Ok(response)
     }
@@ -357,8 +388,8 @@ impl<R: UserRepository> UserService<R> {
             return Err(AppError::Business(BusinessError::UserNotFound(id.to_string())));
         }
 
-        let key = format!("user:{id}");
-        self.cache.delete(&key).await;
+        let key = user_profile_key(id);
+        self.cache.delete_best_effort(&key).await;
         Ok(())
     }
 
@@ -385,13 +416,14 @@ impl<R: UserRepository> UserService<R> {
             .update(&self.pool, user_id, &UpdateUserEntity { password_hash: Some(new_hash), ..Default::default() })
             .await?;
 
-        // Invalidate active sessions
-        let session_key = format!("sessions:{user_id}");
-        let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
+        // Invalidate active sessions — fail-closed: không đọc được sessions thì
+        // không được báo đổi pass thành công trong khi session cũ vẫn sống.
+        let session_key = session_list_key(&user_id.to_string());
+        let active_sessions: Vec<String> = self.cache.get(&session_key).await?.unwrap_or_default();
 
-        let mut gone = vec![format!("user:{user_id}"), session_key];
-        gone.extend(active_sessions.into_iter().map(|jti| format!("refreshToken:{jti}")));
-        self.cache.delete_many(&gone).await;
+        let mut gone = vec![user_profile_key(user_id), session_key];
+        gone.extend(active_sessions.into_iter().map(|jti| refresh_token_key(&jti)));
+        self.cache.delete_many(&gone).await?;
 
         info!(user_id = %user_id, "User changed password");
         Ok(())
@@ -409,7 +441,7 @@ impl<R: UserRepository> UserService<R> {
         }
 
         let otp = generate_otp();
-        otp::store(&self.cache, &otp::reset_key(email), otp.clone()).await;
+        otp::store(&self.cache, &otp::reset_key(email), otp.clone()).await?;
         self.mailer.send(email, &OtpEmail::new(otp), lang).await;
 
         Ok(())
@@ -432,13 +464,13 @@ impl<R: UserRepository> UserService<R> {
             .update(&self.pool, user.id, &UpdateUserEntity { password_hash: Some(new_hash), ..Default::default() })
             .await?;
 
-        // Invalidate all active sessions
-        let session_key = format!("sessions:{}", user.id);
-        let active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
+        // Invalidate all active sessions — fail-closed như `change_password`.
+        let session_key = session_list_key(&user.id.to_string());
+        let active_sessions: Vec<String> = self.cache.get(&session_key).await?.unwrap_or_default();
 
-        let mut gone = vec![key, format!("user:{}", user.id), session_key];
-        gone.extend(active_sessions.into_iter().map(|jti| format!("refreshToken:{jti}")));
-        self.cache.delete_many(&gone).await;
+        let mut gone = vec![key, user_profile_key(user.id), session_key];
+        gone.extend(active_sessions.into_iter().map(|jti| refresh_token_key(&jti)));
+        self.cache.delete_many(&gone).await?;
 
         info!(user_id = %user.id, "User reset password");
         Ok(())
@@ -454,20 +486,20 @@ impl<R: UserRepository> UserService<R> {
         let access_token = self.jwt_config.gen_access_token(user_id)?;
         let refresh_token = self.jwt_config.gen_refresh_token(user_id, &jti)?;
 
-        let key = format!("refreshToken:{jti}");
-        let session_key = format!("sessions:{user_id}");
-
-        let mut active_sessions: Vec<String> = self.cache.get(&session_key).await.unwrap_or_default();
-        active_sessions.push(jti);
-        if active_sessions.len() > MAX_SESSIONS_PER_USER {
-            let drain_count = active_sessions.len() - MAX_SESSIONS_PER_USER;
-            let gone: Vec<String> =
-                active_sessions.drain(0..drain_count).map(|old_jti| format!("refreshToken:{old_jti}")).collect();
-            self.cache.delete_many(&gone).await;
-        }
-
-        self.cache.set(&key, &user_id.to_string(), REFRESH_TOKEN_EXPIRATION).await;
-        self.cache.set(&session_key, &active_sessions, REFRESH_TOKEN_EXPIRATION).await;
+        // Ghi session nguyên tử (đuổi cũ nhất khi đầy) — fail-closed: đã ký token
+        // nhưng chưa lưu session thì token vô dụng, phải báo 503 thay vì trả về.
+        let subject = user_id.to_string();
+        let key = refresh_token_key(&jti);
+        let session_key = session_list_key(&subject);
+        let new_session = NewRefreshSession {
+            key: &key,
+            session_key: &session_key,
+            subject: &subject,
+            jti: &jti,
+            ttl_secs: REFRESH_TOKEN_EXPIRATION,
+            max_sessions: MAX_SESSIONS_PER_USER,
+        };
+        self.cache.create_refresh_session(&new_session).await?;
 
         Ok(TokensResponse { access_token, refresh_token })
     }

@@ -45,7 +45,7 @@ async fn test_user_signup_and_signin_flow() {
     service.request_otp("alice@example.com", Lang::Vi).await.unwrap();
 
     // Check OTP in cache
-    let entry: OtpEntry = cache.get("otp:alice@example.com").await.unwrap();
+    let entry: OtpEntry = cache.get("otp:alice@example.com").await.unwrap().unwrap();
     let otp = entry.code.clone();
 
     // 2. Sign Up with valid OTP
@@ -145,7 +145,7 @@ async fn test_change_and_reset_password() {
 
     // Forgot password flow
     service.request_forgot_password_otp("bob@example.com", Lang::Vi).await.unwrap();
-    let forgot_entry: OtpEntry = cache.get("forgot_otp:bob@example.com").await.unwrap();
+    let forgot_entry: OtpEntry = cache.get("forgot_otp:bob@example.com").await.unwrap().unwrap();
     let forgot_otp = forgot_entry.code;
 
     service
@@ -188,7 +188,7 @@ async fn test_google_oauth_signin() {
 async fn test_verify_otp_success_failure_and_purpose_isolation() {
     let (service, cache, _) = create_test_user_service();
     service.request_otp("verify@example.com", Lang::Vi).await.unwrap();
-    let entry: OtpEntry = cache.get("otp:verify@example.com").await.unwrap();
+    let entry: OtpEntry = cache.get("otp:verify@example.com").await.unwrap().unwrap();
 
     // Sai mã thì lỗi nhưng chưa hủy.
     assert!(service.verify_otp("verify@example.com", "000000", OtpPurpose::Signup).await.is_err());
@@ -213,7 +213,7 @@ async fn test_verify_otp_success_failure_and_purpose_isolation() {
 async fn test_otp_invalidated_after_max_attempts() {
     let (service, cache, _) = create_test_user_service();
     service.request_otp("cap@example.com", Lang::Vi).await.unwrap();
-    let entry: OtpEntry = cache.get("otp:cap@example.com").await.unwrap();
+    let entry: OtpEntry = cache.get("otp:cap@example.com").await.unwrap().unwrap();
 
     for _ in 0..MAX_OTP_ATTEMPTS {
         assert!(service.verify_otp("cap@example.com", "000000", OtpPurpose::Signup).await.is_err());
@@ -221,14 +221,14 @@ async fn test_otp_invalidated_after_max_attempts() {
 
     // Mã đúng cũng rớt vì entry đã bị xóa sau đủ số lần sai.
     assert!(service.verify_otp("cap@example.com", &entry.code, OtpPurpose::Signup).await.is_err());
-    assert!(cache.get::<OtpEntry>("otp:cap@example.com").await.is_none());
+    assert!(cache.get::<OtpEntry>("otp:cap@example.com").await.unwrap().is_none());
 }
 
 #[tokio::test]
 async fn test_signup_attempts_share_counter_with_verify() {
     let (service, cache, _) = create_test_user_service();
     service.request_otp("shared@example.com", Lang::Vi).await.unwrap();
-    let entry: OtpEntry = cache.get("otp:shared@example.com").await.unwrap();
+    let entry: OtpEntry = cache.get("otp:shared@example.com").await.unwrap().unwrap();
 
     // Sai 2 lần qua signup, đúng qua verify vẫn pass (chung 1 counter, chưa tới hạn).
     let bad = SignUpRequest {
@@ -270,7 +270,7 @@ async fn test_verify_otp_reset_purpose_success_and_isolation() {
     seed_user_for_reset(&repo, "reset-verify@example.com").await;
 
     service.request_forgot_password_otp("reset-verify@example.com", Lang::Vi).await.unwrap();
-    let entry: OtpEntry = cache.get("forgot_otp:reset-verify@example.com").await.unwrap();
+    let entry: OtpEntry = cache.get("forgot_otp:reset-verify@example.com").await.unwrap().unwrap();
 
     // Sai mã thì lỗi nhưng chưa hủy.
     assert!(service.verify_otp("reset-verify@example.com", "000000", OtpPurpose::Reset).await.is_err());
@@ -296,7 +296,7 @@ async fn test_reset_otp_invalidated_after_max_attempts() {
     seed_user_for_reset(&repo, "reset-cap@example.com").await;
 
     service.request_forgot_password_otp("reset-cap@example.com", Lang::Vi).await.unwrap();
-    let entry: OtpEntry = cache.get("forgot_otp:reset-cap@example.com").await.unwrap();
+    let entry: OtpEntry = cache.get("forgot_otp:reset-cap@example.com").await.unwrap().unwrap();
 
     for _ in 0..MAX_OTP_ATTEMPTS {
         assert!(service.verify_otp("reset-cap@example.com", "000000", OtpPurpose::Reset).await.is_err());
@@ -304,5 +304,5 @@ async fn test_reset_otp_invalidated_after_max_attempts() {
 
     // Mã đúng cũng rớt vì entry đã bị xóa sau đủ số lần sai.
     assert!(service.verify_otp("reset-cap@example.com", &entry.code, OtpPurpose::Reset).await.is_err());
-    assert!(cache.get::<OtpEntry>("forgot_otp:reset-cap@example.com").await.is_none());
+    assert!(cache.get::<OtpEntry>("forgot_otp:reset-cap@example.com").await.unwrap().is_none());
 }

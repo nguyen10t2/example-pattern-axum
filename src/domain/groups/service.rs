@@ -24,7 +24,7 @@ use crate::{
     },
     errors::{AppError, BusinessError, map_unique_violation},
     utils::{
-        cache::{CACHE_EXPIRATION, Cache, CacheStore, CacheStoreExt},
+        cache::{CACHE_EXPIRATION, Cache, CacheStoreExt, group_summary_key},
         random::generate_invite_code,
     },
 };
@@ -103,7 +103,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         match self.group_repo.add_member(&self.pool, &new_member).await {
             Ok(_) => {
                 info!(group_id = %group.id, user_id = %user_id, "User joined group via invite code");
-                self.cache.delete(&format!("group_summary:{}", group.id)).await;
+                self.cache.delete_best_effort(&group_summary_key(group.id)).await;
             }
             Err(err) => {
                 // If unique violation (already joined), ignore conflict like in TS
@@ -162,7 +162,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         group_id: Uuid,
         current_user_id: Uuid,
     ) -> Result<GroupSummaryResponse, AppError> {
-        let cache_key = format!("group_summary:{group_id}");
+        let cache_key = group_summary_key(group_id);
 
         // Fetch members once; reused for both membership check and summary building
         let members = self.group_repo.find_members(&self.pool, group_id).await?;
@@ -170,7 +170,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             return Err(AppError::Business(BusinessError::NotGroupMember));
         }
 
-        if let Some(cached) = self.cache.get::<GroupSummaryResponse>(&cache_key).await {
+        if let Some(cached) = self.cache.get_best_effort::<GroupSummaryResponse>(&cache_key).await {
             return Ok(cached);
         }
 
@@ -238,7 +238,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
                 .collect(),
         };
 
-        self.cache.set(&cache_key, &summary, CACHE_EXPIRATION).await;
+        self.cache.set_best_effort(&cache_key, &summary, CACHE_EXPIRATION).await;
 
         Ok(summary)
     }
@@ -269,7 +269,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         let user = self.user_repo.find_by_id(&self.pool, data.user_id).await?;
         let full_name = user.map_or_else(|| "Unknown Member".to_string(), |u| u.full_name);
 
-        self.cache.delete(&format!("group_summary:{group_id}")).await;
+        self.cache.delete_best_effort(&group_summary_key(group_id)).await;
         invalidate_member_cache(&self.cache, group_id).await;
 
         Ok(GroupMemberResponse {
@@ -321,7 +321,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             return Err(AppError::Business(BusinessError::GroupNotFound));
         }
 
-        self.cache.delete(&format!("group_summary:{id}")).await;
+        self.cache.delete_best_effort(&group_summary_key(id)).await;
         invalidate_member_cache(&self.cache, id).await;
         Ok(())
     }

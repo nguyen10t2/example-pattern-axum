@@ -26,6 +26,8 @@ pub const DELETE_PERMISSION_DENIED: &str = "DELETE_PERMISSION_DENIED";
 // General
 pub const BAD_REQUEST: &str = "BAD_REQUEST";
 pub const INTERNAL_SERVER_ERROR: &str = "INTERNAL_SERVER_ERROR";
+/// Cache hạ tầng lỗi trên path critical — client retry được (fail-closed 503).
+pub const SERVICE_UNAVAILABLE: &str = "SERVICE_UNAVAILABLE";
 pub const NOT_FOUND: &str = "NOT_FOUND";
 pub const VALIDATION_ERROR: &str = "VALIDATION_ERROR";
 pub const TOO_MANY_REQUESTS: &str = "TOO_MANY_REQUESTS";

@@ -1,3 +1,8 @@
+/// Lỗi hạ tầng hệ thống (DB, cache, mail, ...).
+///
+/// Mọi variant mặc định map sang `500`, trừ [`SystemError::Cache`] (dependency bắt
+/// buộc cho auth) map sang `503` để client/LB phân biệt "sập tạm thời, retry được"
+/// với "lỗi server".
 #[derive(Debug, thiserror::Error)]
 pub enum SystemError {
     #[error("Password hashing failed: {0}")]
@@ -26,6 +31,21 @@ pub enum SystemError {
 
     #[error("Internal server error: {0}")]
     Internal(String),
+
+    /// Cache (Redis) lỗi trên path critical (session/OTP/revoke) — fail-closed 503.
+    #[error("cache unavailable: {0}")]
+    Cache(#[from] crate::utils::cache::CacheError),
+}
+
+impl SystemError {
+    /// Map lỗi hệ thống sang HTTP status (`const` vì chỉ match discriminant).
+    #[must_use]
+    pub const fn status_code(&self) -> axum::http::StatusCode {
+        match self {
+            Self::Cache(_) => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }
 
 #[cfg(test)]

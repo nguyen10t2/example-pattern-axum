@@ -21,7 +21,7 @@ use crate::{
         shared::{PaginatedResponse, PaginationQuery},
     },
     errors::{AppError, BusinessError},
-    utils::cache::{Cache, CacheStore},
+    utils::cache::{Cache, CacheStoreExt, group_summary_key},
 };
 use sqlx::PgPool;
 
@@ -84,8 +84,8 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
 
         tx.commit().await?;
 
-        // Invalidate group summary cache
-        self.cache.delete(&format!("group_summary:{}", data.group_id)).await;
+        // Invalidate group summary cache (best-effort, không critical)
+        self.cache.delete_best_effort(&group_summary_key(data.group_id)).await;
 
         info!(expense_id = %expense.id, group_id = %expense.group_id, "Expense created");
 
@@ -204,7 +204,7 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
         }
 
         self.expense_repo.soft_delete(&self.pool, id).await?;
-        self.cache.delete(&format!("group_summary:{}", expense.group_id)).await;
+        self.cache.delete_best_effort(&group_summary_key(expense.group_id)).await;
 
         info!(expense_id = %id, deleted_by = %current_user_id, "Expense deleted");
         Ok(())

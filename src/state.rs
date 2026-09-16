@@ -29,6 +29,8 @@ pub enum AppStateError {
     InvalidDatabaseUrl(#[from] sqlx::Error),
     #[error(transparent)]
     Redis(#[from] crate::config::RedisConnectError),
+    #[error("invalid jwt configuration: {0}")]
+    InvalidJwt(#[from] crate::utils::jwt::JwtConfigError),
     #[error("invalid email configuration: {0}")]
     InvalidEmail(#[from] crate::utils::email::EmailConfigError),
 }
@@ -73,7 +75,7 @@ impl AppState {
 
         let cache = Arc::new(Cache::Redis(RedisCache::new(connection_manager.clone())));
         let rate_limiter = RedisRateLimiter::new(connection_manager);
-        let jwt_config = JwtConfig::from_env();
+        let jwt_config = JwtConfig::from_env()?;
         let google_oauth = GoogleOAuthConfig::from_env();
 
         let user_repo = PostgresUserRepository::new();

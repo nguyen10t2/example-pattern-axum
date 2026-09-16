@@ -18,7 +18,13 @@ use dsa::{
         users::entity::UserEntity,
     },
     middleware::RedisRateLimiter,
-    utils::cache::{Cache, CacheStore, RedisCache},
+    utils::{
+        cache::{
+            Cache, CacheStore, NewRefreshSession, OtpCheckOutcome, RedisCache, RefreshRotation, RevokeRefreshSession,
+            RotationOutcome,
+        },
+        otp::{consume, reset_key, store},
+    },
 };
 use std::sync::Arc;
 
@@ -161,15 +167,81 @@ async fn test_membership_cache_roundtrip_over_redis() {
 
 #[tokio::test]
 #[ignore = "requires a live Redis (REDIS_URL or 127.0.0.1:6379)"]
+async fn test_redis_rotate_refresh_roundtrip_and_stale() {
+    let cache = Cache::Redis(RedisCache::new(test_manager().await));
+    let suffix = Uuid::now_v7();
+    let old_key = format!("refreshToken:{suffix}-old");
+    let new_key = format!("refreshToken:{suffix}-new");
+    let session_key = format!("sessions:{suffix}-user");
+
+    let create = NewRefreshSession {
+        key: &old_key,
+        session_key: &session_key,
+        subject: "live-user",
+        jti: &format!("{suffix}-old"),
+        ttl_secs: 60,
+        max_sessions: 5,
+    };
+    cache.create_refresh_session(&create).await.unwrap();
+
+    let rotation = RefreshRotation {
+        old_key: &old_key,
+        new_key: &new_key,
+        session_key: &session_key,
+        subject: "live-user",
+        old_jti: &format!("{suffix}-old"),
+        new_jti: &format!("{suffix}-new"),
+        ttl_secs: 60,
+    };
+    assert_eq!(cache.rotate_refresh_token(&rotation).await.unwrap(), RotationOutcome::Rotated);
+    assert!(cache.get_raw(&old_key).await.unwrap().is_none());
+    assert_eq!(cache.get_raw(&new_key).await.unwrap().as_deref(), Some("live-user"));
+
+    // Replay key cũ → Stale, key mới còn nguyên (reuse-detection ở service sẽ revoke family).
+    assert_eq!(cache.rotate_refresh_token(&rotation).await.unwrap(), RotationOutcome::Stale);
+    assert_eq!(cache.get_raw(&new_key).await.unwrap().as_deref(), Some("live-user"));
+
+    // Thu hồi nốt để dọn.
+    let revoke =
+        RevokeRefreshSession { key: &new_key, session_key: &session_key, jti: &format!("{suffix}-new"), ttl_secs: 60 };
+    cache.revoke_refresh_session(&revoke).await.unwrap();
+    assert!(cache.get_raw(&session_key).await.unwrap().is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires a live Redis (REDIS_URL or 127.0.0.1:6379)"]
+async fn test_redis_otp_check_keeps_ttl_and_locks() {
+    let cache = Cache::Redis(RedisCache::new(test_manager().await));
+    let key = reset_key(&format!("live-{}@example.com", Uuid::now_v7()));
+    store(&cache, &key, "123456".to_string()).await.unwrap();
+
+    let mut raw = test_client().await;
+    let ttl_before: i64 = raw.ttl(&key).await.unwrap();
+
+    // Sai 1 lần: còn lượt, TTL KHÔNG bị reset về full (KEEPTTL).
+    assert_eq!(cache.check_otp_code(&key, "000000", 2).await.unwrap(), OtpCheckOutcome::Mismatch);
+    let ttl_after: i64 = raw.ttl(&key).await.unwrap();
+    assert!(ttl_after <= ttl_before, "TTL slid: before={ttl_before} after={ttl_after}");
+
+    // Sai lần 2 (max=2) → Locked, entry biến mất.
+    assert_eq!(cache.check_otp_code(&key, "000000", 2).await.unwrap(), OtpCheckOutcome::Locked);
+    assert_eq!(cache.check_otp_code(&key, "123456", 2).await.unwrap(), OtpCheckOutcome::Missing);
+
+    // consume là no-op an toàn trên key đã mất.
+    consume(&cache, &key).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a live Redis (REDIS_URL or 127.0.0.1:6379)"]
 async fn test_redis_cache_delete_many_pipelined() {
     let cache = RedisCache::new(test_manager().await);
     let suffix = Uuid::now_v7();
     let keys: Vec<String> = (0..3).map(|i| format!("cache-test:{suffix}:{i}")).collect();
 
     for key in &keys {
-        cache.set_raw(key, "v", 60).await;
+        cache.set_raw(key, "v", 60).await.unwrap();
     }
-    cache.delete_many(&keys).await;
+    cache.delete_many(&keys).await.unwrap();
 
     let mut raw = test_client().await;
     for key in &keys {
