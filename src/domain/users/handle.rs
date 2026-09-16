@@ -1,12 +1,13 @@
 use axum::{
     Router,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
+use std::net::SocketAddr;
 use std::sync::LazyLock;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -30,14 +31,14 @@ use crate::{
     utils::{
         cache::REFRESH_TOKEN_EXPIRATION,
         i18n::t_simple,
-        oauth::{generate_code_verifier, generate_state},
+        oauth::{generate_code_challenge, generate_code_verifier, generate_state},
     },
 };
 
 /// Gắn cờ `Secure` cho cookie khi `COOKIE_SECURE=true|1` (bắt buộc ở production HTTPS).
 /// Đọc một lần lúc boot (static) vì env không đổi lúc runtime.
 static COOKIE_SECURE: LazyLock<bool> = LazyLock::new(|| {
-    std::env::var("COOKIE_SECURE").is_ok_and(|v| v.eq_ignore_ascii_case("true") || v == "1") || DEFAULT_COOKIE_SECURE
+    std::env::var("COOKIE_SECURE").map_or(DEFAULT_COOKIE_SECURE, |v| v.eq_ignore_ascii_case("true") || v == "1")
 });
 
 /// Dựng cookie refresh chuẩn (`HttpOnly` + `SameSite=Strict` + `Secure` theo env).
@@ -61,7 +62,9 @@ fn build_refresh_cookie(refresh_token: String) -> Cookie<'static> {
 fn build_remove_refresh_cookie() -> Cookie<'static> {
     let mut cookie = Cookie::new(REFRESH_COOKIE_NAME, "");
     cookie.set_path("/");
+    cookie.set_http_only(true);
     cookie.set_secure(*COOKIE_SECURE);
+    cookie.set_same_site(SameSite::Strict);
     cookie.set_max_age(time::Duration::seconds(0));
     cookie
 }
@@ -99,16 +102,17 @@ pub async fn handle_request_otp(
     State(state): State<AppState>,
     RequestLang(lang): RequestLang,
     headers: HeaderMap,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     ValidatedJson(body): ValidatedJson<RequestOtpRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
-    let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_ip_limit("request-otp", &ip, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_WINDOW).await {
+    let ip = extract_client_ip(&headers, peer_addr.ip()).to_string();
+    if !state.rate_limiter.check_ip_limit("request-otp", &ip, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_WINDOW).await? {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
     if !state
         .rate_limiter
         .check_email_limit("request-otp", &body.email, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_EMAIL_WINDOW)
-        .await
+        .await?
     {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
@@ -126,10 +130,11 @@ pub async fn handle_verify_otp(
     State(state): State<AppState>,
     RequestLang(lang): RequestLang,
     headers: HeaderMap,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     ValidatedJson(body): ValidatedJson<VerifyOtpRequest>,
 ) -> Result<SuccessResponse<bool>, AppError> {
-    let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_ip_limit("verify-otp", &ip, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW).await {
+    let ip = extract_client_ip(&headers, peer_addr.ip()).to_string();
+    if !state.rate_limiter.check_ip_limit("verify-otp", &ip, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW).await? {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
@@ -160,13 +165,14 @@ pub async fn handle_forgot_password_otp(
     State(state): State<AppState>,
     RequestLang(lang): RequestLang,
     headers: HeaderMap,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     ValidatedJson(body): ValidatedJson<ForgotPasswordOtpRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
-    let ip = extract_client_ip(&headers);
+    let ip = extract_client_ip(&headers, peer_addr.ip()).to_string();
     if !state
         .rate_limiter
         .check_ip_limit("forgot-password-otp", &ip, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_WINDOW)
-        .await
+        .await?
     {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
@@ -178,7 +184,7 @@ pub async fn handle_forgot_password_otp(
             RATE_LIMIT_REQUEST_OTP_EMAIL_MAX,
             RATE_LIMIT_EMAIL_WINDOW,
         )
-        .await
+        .await?
     {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
@@ -210,11 +216,12 @@ pub async fn handle_signin(
     State(state): State<AppState>,
     RequestLang(lang): RequestLang,
     headers: HeaderMap,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     jar: CookieJar,
     ValidatedJson(body): ValidatedJson<SignInRequest>,
 ) -> Result<(CookieJar, SuccessResponse<AuthResponse>), AppError> {
-    let ip = extract_client_ip(&headers);
-    if !state.rate_limiter.check_ip_limit("signin", &ip, RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW).await {
+    let ip = extract_client_ip(&headers, peer_addr.ip()).to_string();
+    if !state.rate_limiter.check_ip_limit("signin", &ip, RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW).await? {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 
@@ -278,18 +285,21 @@ pub async fn handle_google_auth(
 ) -> Result<(CookieJar, Redirect), AppError> {
     let oauth_state = generate_state();
     let code_verifier = generate_code_verifier();
+    let code_challenge = generate_code_challenge(&code_verifier);
 
-    let auth_url = state.google_oauth.generate_auth_url(&oauth_state, &code_verifier);
+    let auth_url = state.google_oauth.generate_auth_url(&oauth_state, &code_challenge)?;
 
     let mut state_cookie = Cookie::new("google_oauth_state", oauth_state);
     state_cookie.set_path("/");
     state_cookie.set_http_only(true);
+    state_cookie.set_secure(*COOKIE_SECURE);
     state_cookie.set_max_age(time::Duration::seconds(OAUTH_COOKIE_MAX_AGE_SECS));
     state_cookie.set_same_site(SameSite::Lax);
 
     let mut verifier_cookie = Cookie::new("google_oauth_code_verifier", code_verifier);
     verifier_cookie.set_path("/");
     verifier_cookie.set_http_only(true);
+    verifier_cookie.set_secure(*COOKIE_SECURE);
     verifier_cookie.set_max_age(time::Duration::seconds(OAUTH_COOKIE_MAX_AGE_SECS));
     verifier_cookie.set_same_site(SameSite::Lax);
 
@@ -319,11 +329,12 @@ pub async fn handle_google_callback(
         return Err(AppError::Business(BusinessError::Unauthorized));
     }
 
-    // TODO(oauth-code-exchange): `code` đang được dùng thẳng làm access token cho
-    // userinfo — thiếu bước exchange code→token ở `oauth2.googleapis.com/token`
-    // (kèm `code_verifier` PKCE trong cookie). Google login sẽ 401 cho tới khi
-    // bước này được implement + test (ngoài phạm vi milestone hardening).
-    let google_user = state.google_oauth.fetch_user_info(&code).await?;
+    let code_verifier = jar
+        .get("google_oauth_code_verifier")
+        .map(Cookie::value)
+        .ok_or(AppError::Business(BusinessError::Unauthorized))?;
+    let access_token = state.google_oauth.exchange_code(&code, code_verifier).await?;
+    let google_user = state.google_oauth.fetch_user_info(&access_token).await?;
     let tokens = state.user_service.sign_in_with_google(google_user).await?;
 
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| DEFAULT_FRONTEND_URL.to_string());
@@ -376,9 +387,10 @@ pub async fn handle_change_password(
     RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     headers: HeaderMap,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     ValidatedJson(body): ValidatedJson<ChangePasswordRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
-    let ip = extract_client_ip(&headers);
+    let ip = extract_client_ip(&headers, peer_addr.ip()).to_string();
     if !state
         .rate_limiter
         .check_mixed_limit(
@@ -389,7 +401,7 @@ pub async fn handle_change_password(
             RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,
             RATE_LIMIT_WINDOW,
         )
-        .await
+        .await?
     {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
