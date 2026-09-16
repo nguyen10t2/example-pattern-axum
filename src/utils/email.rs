@@ -140,7 +140,7 @@ impl Mailer {
         tokio::spawn(async move {
             while let Some(msg) = receiver.recv().await {
                 if let Err(err) = deliver(transport.as_ref(), &from, &msg).await {
-                    error!(target: "email", to = %msg.to, error = %err, "failed to deliver email");
+                    error!(to = %msg.to, error = %err, "failed to deliver email");
                 }
             }
         });
@@ -160,7 +160,7 @@ impl Mailer {
         };
 
         if self.sender.send(msg).await.is_err() {
-            error!(target: "email", to = %to, "mail queue closed; dropped email");
+            error!(to = %to, "mail queue closed; dropped email");
         }
     }
 }
@@ -178,7 +178,7 @@ async fn deliver(
     msg: &MailMessage,
 ) -> Result<(), AppError> {
     let Some(transport) = transport else {
-        info!(target: "email", to = %msg.to, subject = %msg.subject, "email delivered (log-only mode)");
+        info!(to = %msg.to, subject = %msg.subject, "email delivered (log-only mode)");
         return Ok(());
     };
     let email = Message::builder()
@@ -187,7 +187,7 @@ async fn deliver(
         .subject(&msg.subject)
         .multipart(MultiPart::alternative_plain_html(msg.text_body.clone(), msg.html_body.clone()))?;
     transport.send(email).await?;
-    info!(target: "email", to = %msg.to, subject = %msg.subject, "email delivered");
+    info!(to = %msg.to, subject = %msg.subject, "email delivered successfully");
     Ok(())
 }
 
