@@ -32,7 +32,7 @@ async fn main() {
 
     let host = std::env::var("HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
     let port = std::env::var("PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string());
-    let addr = dbg!(format!("{host}:{port}"));
+    let addr = format!("{host}:{port}");
 
     let state = match AppState::from_env().await {
         Ok(state) => state,
@@ -79,10 +79,12 @@ async fn main() {
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {
                     let method = request.method();
-                    let uri = request.uri();
+                    // Never attach query strings to spans: OAuth callbacks carry
+                    // short-lived authorization codes and state in the query.
+                    let path = request.uri().path();
                     let matched_path = request.extensions().get::<MatchedPath>().map(MatchedPath::as_str);
 
-                    tracing::info_span!("request", %method, %uri, matched_path)
+                    tracing::info_span!("request", %method, %path, matched_path)
                 })
                 .on_failure(()),
         )
@@ -97,7 +99,10 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
+    if let Err(e) = axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+    {
         tracing::error!("Server error: {e}");
         std::process::exit(1);
     }

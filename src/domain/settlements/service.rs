@@ -47,12 +47,23 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         let members = member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id).await?;
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
-        if !member_ids.contains(&current_user_id) {
+        let current_member = members.iter().find(|member| member.user_id == current_user_id);
+        let Some(current_member) = current_member else {
             return Err(AppError::Business(BusinessError::NotGroupMember));
-        }
+        };
 
         if !member_ids.contains(&data.sender_id) || !member_ids.contains(&data.receiver_id) {
             return Err(AppError::Business(BusinessError::UserNotInGroup("Sender or receiver".to_string())));
+        }
+
+        if data.sender_id == data.receiver_id {
+            return Err(AppError::Business(BusinessError::BadRequest(
+                "Sender and receiver must be different users".to_string(),
+            )));
+        }
+
+        if data.sender_id != current_user_id && current_member.role != GroupRole::ADMIN {
+            return Err(AppError::Business(BusinessError::Forbidden));
         }
 
         let new_settlement = NewSettlementEntity {

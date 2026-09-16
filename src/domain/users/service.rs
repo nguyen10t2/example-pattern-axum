@@ -142,6 +142,10 @@ impl<R: UserRepository> UserService<R> {
             return Err(AppError::Business(BusinessError::InvalidCredentials));
         };
 
+        if !user.is_active {
+            return Err(AppError::Business(BusinessError::InvalidCredentials));
+        }
+
         let Some(password_hash) = &user.password_hash else {
             return Err(AppError::Business(BusinessError::InvalidCredentials));
         };
@@ -169,6 +173,9 @@ impl<R: UserRepository> UserService<R> {
 
         let user = match self.repo.find_by_google_id(&self.pool, &google_user.sub).await? {
             Some(mut user) => {
+                if !user.is_active {
+                    return Err(AppError::Business(BusinessError::InvalidCredentials));
+                }
                 if let Some(ref avatar) = google_user.picture
                     && user.avatar_url.as_ref() != Some(avatar)
                 {
@@ -185,6 +192,9 @@ impl<R: UserRepository> UserService<R> {
             }
             None => {
                 if let Some(user) = self.repo.find_by_email(&self.pool, &google_user.email).await? {
+                    if !user.is_active {
+                        return Err(AppError::Business(BusinessError::InvalidCredentials));
+                    }
                     let updated = self
                         .repo
                         .update(
@@ -280,6 +290,11 @@ impl<R: UserRepository> UserService<R> {
 
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::Business(BusinessError::InvalidSession))?;
 
+        if !self.is_active(user_id).await? {
+            self.revoke_family(&claims.sub).await?;
+            return Err(AppError::Business(BusinessError::InvalidSession));
+        }
+
         let new_jti = Uuid::now_v7().to_string();
         // Ký trước, xoay sau: xoay lỗi (503) thì session cũ còn nguyên, client retry được.
         let new_access_token = self.jwt_config.gen_access_token(user_id)?;
@@ -304,6 +319,18 @@ impl<R: UserRepository> UserService<R> {
         }
 
         Ok(TokensResponse { access_token: new_access_token, refresh_token: new_refresh_token })
+    }
+
+    /// Check whether a token subject still represents an enabled account.
+    ///
+    /// This intentionally reads the source of truth instead of the profile cache,
+    /// so account deactivation takes effect for existing access tokens immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database error when account status cannot be checked.
+    pub async fn is_active(&self, id: Uuid) -> Result<bool, AppError> {
+        Ok(self.repo.find_by_id(&self.pool, id).await?.is_some_and(|user| user.is_active))
     }
 
     /// Thu hồi toàn bộ sessions của subject (dùng khi phát hiện replay refresh token).

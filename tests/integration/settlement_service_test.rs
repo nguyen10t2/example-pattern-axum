@@ -24,6 +24,14 @@ async fn test_settlement_lifecycle_and_permissions() {
         role: GroupRole::MEMBER,
         joined_at: Utc::now(),
     });
+    let other_member = Uuid::now_v7();
+    group_repo.members.lock().await.push(GroupMemberWithUser {
+        group_id,
+        user_id: other_member,
+        full_name: "Other member".to_string(),
+        role: GroupRole::MEMBER,
+        joined_at: Utc::now(),
+    });
     group_repo.members.lock().await.push(GroupMemberWithUser {
         group_id,
         user_id: receiver,
@@ -52,6 +60,38 @@ async fn test_settlement_lifecycle_and_permissions() {
         )
         .await;
     assert!(outsider_res.is_err());
+
+    // A regular member cannot forge a settlement on behalf of the sender.
+    let impersonation_res = service
+        .create(
+            CreateSettlementRequest {
+                group_id,
+                sender_id: sender,
+                receiver_id: receiver,
+                amount: 75,
+                currency: Currency::VND,
+                settled_at: None,
+            },
+            other_member,
+        )
+        .await;
+    assert!(impersonation_res.is_err());
+
+    // A no-op self-settlement is invalid even when initiated by that user.
+    let self_settlement_res = service
+        .create(
+            CreateSettlementRequest {
+                group_id,
+                sender_id: sender,
+                receiver_id: sender,
+                amount: 75,
+                currency: Currency::VND,
+                settled_at: None,
+            },
+            sender,
+        )
+        .await;
+    assert!(self_settlement_res.is_err());
 
     // Valid settlement by sender
     let settlement = service
