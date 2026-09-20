@@ -1,7 +1,7 @@
 #![allow(clippy::missing_errors_doc)]
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{State},
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
@@ -13,7 +13,7 @@ use crate::{
         RATE_LIMIT_JOIN_GROUP_USER_MAX, RATE_LIMIT_WINDOW,
     },
     domain::groups::{
-        request::{AddMemberRequest, CreateGroupRequest, JoinGroupRequest},
+        request::{AddMemberRequest, ChangeRoleRequest, CreateGroupRequest, JoinGroupRequest},
         response::{GroupMemberResponse, GroupResponse, GroupSummaryResponse},
     },
     errors::{AppError, BusinessError},
@@ -194,23 +194,18 @@ pub async fn handle_delete_group(
 pub async fn handle_leave_group(
     State(state): State<AppState>,
     AuthUser(current_user_id): AuthUser,
-    Path(id): Path<Uuid>,
+    ValidatedPath(id): ValidatedPath<Uuid>,
 ) -> Result<SuccessResponse<()>, AppError> {
     state.group_service.leave_group(id, current_user_id).await?;
     Ok(SuccessResponse::ok(()))
-}
-
-#[derive(serde::Deserialize)]
-pub struct ChangeRoleRequest {
-    pub role: crate::domain::GroupRole,
 }
 
 #[allow(clippy::missing_errors_doc)]
 pub async fn handle_change_member_role(
     State(state): State<AppState>,
     AuthUser(current_user_id): AuthUser,
-    Path((id, user_id)): Path<(Uuid, Uuid)>,
-    axum::Json(payload): axum::Json<ChangeRoleRequest>,
+    ValidatedPath((id, user_id)): ValidatedPath<(Uuid, Uuid)>,
+    ValidatedJson(payload): ValidatedJson<ChangeRoleRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
     state.group_service.change_member_role(id, current_user_id, user_id, payload.role).await?;
     Ok(SuccessResponse::ok(()))
