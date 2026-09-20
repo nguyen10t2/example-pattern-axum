@@ -40,6 +40,60 @@ static COOKIE_SECURE: LazyLock<bool> = LazyLock::new(|| {
     std::env::var("COOKIE_SECURE").is_ok_and(|v| v.eq_ignore_ascii_case("true") || v == "1") || DEFAULT_COOKIE_SECURE
 });
 
+/// `SameSite` cho refresh cookie, đọc từ `COOKIE_SAMESITE` (`strict|lax|none`,
+/// mặc định `strict`). Deploy cross-site thật (FE Cloudflare + BE Render) bắt
+/// buộc `none` + `COOKIE_SECURE=true`, ngược lại browser không gửi cookie trên
+/// fetch cross-site → F5 logout + rác session Redis.
+/// Đọc một lần lúc boot (static) vì env không đổi lúc runtime.
+static COOKIE_SAMESITE: LazyLock<SameSite> =
+    LazyLock::new(|| parse_cookie_samesite(std::env::var("COOKIE_SAMESITE").ok().as_deref()));
+
+/// Lỗi cấu hình cookie lúc boot — đều fatal: caller log rồi exit (fail-fast),
+/// vì cookie sai thì auth gãy hoàn toàn mà không báo lỗi rõ ràng lúc runtime.
+#[derive(Debug, thiserror::Error)]
+pub enum CookieConfigError {
+    /// `SameSite=None` mà thiếu `Secure` thì browser từ chối cookie luôn.
+    #[error("COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers reject SameSite=None without Secure)")]
+    SameSiteNoneWithoutSecure,
+}
+
+/// Parse giá trị `COOKIE_SAMESITE`: `lax`/`none` (case-insensitive, trim),
+/// còn lại (kể cả unset) về `Strict` — fail-closed.
+///
+/// Sync + pure (không đọc env) để unit test không chạm env thật.
+fn parse_cookie_samesite(raw: Option<&str>) -> SameSite {
+    match raw.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Some("lax") => SameSite::Lax,
+        Some("none") => SameSite::None,
+        _ => SameSite::Strict,
+    }
+}
+
+/// Kiểm tra combo `SameSite` + `Secure` có hợp lệ không (pure để dễ test).
+///
+/// Sync vì chỉ so sánh enum/bool trong RAM, không có I/O.
+///
+/// # Errors
+///
+/// Trả [`CookieConfigError::SameSiteNoneWithoutSecure`] khi `none` mà không `Secure`.
+fn validate_cookie_combo(samesite: SameSite, secure: bool) -> Result<(), CookieConfigError> {
+    if samesite == SameSite::None && !secure {
+        return Err(CookieConfigError::SameSiteNoneWithoutSecure);
+    }
+    Ok(())
+}
+
+/// Kiểm tra cấu hình cookie từ env lúc boot (fail-fast, gọi ở `main` trước khi serve).
+///
+/// Sync vì chỉ đọc 2 static đã parse sẵn lúc boot, không có I/O.
+///
+/// # Errors
+///
+/// Trả [`CookieConfigError`] khi combo `COOKIE_SAMESITE`/`COOKIE_SECURE` không hợp lệ.
+pub fn validate_cookie_env() -> Result<(), CookieConfigError> {
+    validate_cookie_combo(*COOKIE_SAMESITE, *COOKIE_SECURE)
+}
+
 /// Dựng cookie refresh chuẩn (`HttpOnly` + `SameSite=Strict` + `Secure` theo env).
 ///
 /// Gom 3 điểm dựng rời rạc (signin/refresh/callback) về một chỗ để không lệch
@@ -49,7 +103,7 @@ fn build_refresh_cookie(refresh_token: String) -> Cookie<'static> {
     cookie.set_path("/");
     cookie.set_http_only(true);
     cookie.set_secure(*COOKIE_SECURE);
-    cookie.set_same_site(SameSite::Strict);
+    cookie.set_same_site(*COOKIE_SAMESITE);
     let expires = OffsetDateTime::now_utc() + time::Duration::seconds(REFRESH_TOKEN_EXPIRATION.cast_signed());
     cookie.set_expires(expires);
     cookie
@@ -426,4 +480,43 @@ pub async fn handle_get_user_by_email(
 ) -> Result<SuccessResponse<UserResponse>, AppError> {
     let user = state.user_service.find_by_email(&email).await?;
     Ok(SuccessResponse::with_message(user, t_simple("USER_FOUND", lang)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_cookie_samesite_defaults_strict() {
+        assert_eq!(parse_cookie_samesite(None), SameSite::Strict);
+        assert_eq!(parse_cookie_samesite(Some("")), SameSite::Strict);
+        assert_eq!(parse_cookie_samesite(Some("bogus")), SameSite::Strict);
+    }
+
+    #[test]
+    fn test_parse_cookie_samesite_lax_and_none_case_insensitive() {
+        for raw in ["lax", "LAX", " Lax "] {
+            assert_eq!(parse_cookie_samesite(Some(raw)), SameSite::Lax);
+        }
+        for raw in ["none", "NONE", " None "] {
+            assert_eq!(parse_cookie_samesite(Some(raw)), SameSite::None);
+        }
+    }
+
+    #[test]
+    fn test_validate_cookie_combo_rejects_none_without_secure() {
+        assert!(validate_cookie_combo(SameSite::None, false).is_err());
+        assert!(matches!(
+            validate_cookie_combo(SameSite::None, false).unwrap_err(),
+            CookieConfigError::SameSiteNoneWithoutSecure
+        ));
+    }
+
+    #[test]
+    fn test_validate_cookie_combo_accepts_valid_combos() {
+        assert!(validate_cookie_combo(SameSite::None, true).is_ok());
+        assert!(validate_cookie_combo(SameSite::Strict, false).is_ok());
+        assert!(validate_cookie_combo(SameSite::Strict, true).is_ok());
+        assert!(validate_cookie_combo(SameSite::Lax, false).is_ok());
+    }
 }

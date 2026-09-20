@@ -6,7 +6,10 @@ use axum::{
     routing::get,
 };
 use serde_json::{Value, json};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    trace::TraceLayer,
+};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -34,6 +37,13 @@ async fn main() {
     let port = std::env::var("PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string());
     let addr = dbg!(format!("{host}:{port}"));
 
+    // Fail-fast khi combo cookie sai (SameSite=None mà thiếu Secure): browser từ
+    // chối cookie thì auth gãy hoàn toàn — phải chết lúc boot với log rõ ràng.
+    if let Err(e) = dsa::domain::users::handle::validate_cookie_env() {
+        tracing::error!("Invalid cookie configuration: {e}");
+        std::process::exit(1);
+    }
+
     let state = match AppState::from_env().await {
         Ok(state) => state,
         Err(e) => {
@@ -51,9 +61,7 @@ async fn main() {
     let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| DEFAULT_FRONTEND_URL.to_string());
 
     let cors = CorsLayer::new()
-        .allow_origin(
-            frontend_url.parse::<HeaderValue>().unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_FRONTEND_URL)),
-        )
+        .allow_origin(AllowOrigin::list(parse_cors_origins(&frontend_url)))
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
         .allow_headers([
             header::AUTHORIZATION,
@@ -140,4 +148,39 @@ async fn root_info() -> Json<Value> {
         "message": "SplitDebt API is running",
         "version": "1.0.0"
     }))
+}
+
+/// Parse danh sách origin CORS từ `FRONTEND_URL`, phân tách dấu phẩy để vừa cho
+/// FE prod (Cloudflare) vừa giữ localhost dev. Entry rỗng/parse lỗi bị bỏ qua;
+/// tất cả lỗi hết thì fallback về [`DEFAULT_FRONTEND_URL`] (fail-closed).
+/// Sync vì chỉ split + parse trong RAM, không có I/O.
+fn parse_cors_origins(raw: &str) -> Vec<HeaderValue> {
+    let origins: Vec<HeaderValue> =
+        raw.split(',').map(str::trim).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+    if origins.is_empty() { vec![HeaderValue::from_static(DEFAULT_FRONTEND_URL)] } else { origins }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_cors_origins_single() {
+        let origins = parse_cors_origins("https://app.example.com");
+        assert_eq!(origins.len(), 1);
+        assert_eq!(origins[0], HeaderValue::from_static("https://app.example.com"));
+    }
+
+    #[test]
+    fn test_parse_cors_origins_multiple_with_spaces() {
+        let origins = parse_cors_origins("https://app.example.com, http://localhost:5173");
+        assert_eq!(origins.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_cors_origins_ignores_empties_and_falls_back() {
+        assert_eq!(parse_cors_origins("").len(), 1);
+        assert_eq!(parse_cors_origins(" , ,").len(), 1);
+        assert_eq!(parse_cors_origins("")[0], HeaderValue::from_static(DEFAULT_FRONTEND_URL));
+    }
 }
