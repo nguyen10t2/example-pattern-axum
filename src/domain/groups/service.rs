@@ -298,8 +298,15 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         target_user_id: Uuid,
         role: GroupRole,
     ) -> Result<(), AppError> {
-        self.ensure_admin(id, current_user_id).await?;
-        let members = self.group_repo.find_members(&self.pool, id).await?;
+        let ((), members) = tokio::try_join!(
+            self.ensure_admin(id, current_user_id),
+            async {
+                self.group_repo
+                    .find_members(&self.pool, id)
+                    .await
+                    .map_err(AppError::from)
+            }
+        )?;
         let target_member = members.iter().find(|m| m.user_id == target_user_id && m.left_at.is_none());
         if target_member.is_none() {
             return Err(AppError::Business(BusinessError::NotGroupMember));
@@ -323,7 +330,22 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     /// Nếu là người cuối cùng, nhóm cũng bị xoá.
     #[allow(clippy::manual_let_else)]
     pub async fn leave_group(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
-        let groups = self.group_repo.find_all_by_user(&self.pool, current_user_id).await?;
+        // Chạy song song tìm group_with_balance của user và danh sách members của nhóm để tối ưu roundtrip I/O
+        let (groups, members) = tokio::try_join!(
+            async {
+                self.group_repo
+                    .find_all_by_user(&self.pool, current_user_id)
+                    .await
+                    .map_err(AppError::from)
+            },
+            async {
+                self.group_repo
+                    .find_members(&self.pool, id)
+                    .await
+                    .map_err(AppError::from)
+            }
+        )?;
+
         let group_info = groups.iter().find(|g| g.id == id);
         if let Some(info) = group_info {
             if info.user_balance.unwrap_or(0) != 0 {
@@ -334,7 +356,6 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         } else {
             return Err(AppError::Business(BusinessError::NotGroupMember));
         }
-        let members = self.group_repo.find_members(&self.pool, id).await?;
         let active_members: Vec<_> = members.iter().filter(|m| m.left_at.is_none()).collect();
         let my_member = active_members.iter().find(|m| m.user_id == current_user_id);
 
