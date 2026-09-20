@@ -81,7 +81,7 @@ impl GroupRepository for PostgresGroupRepository {
             "SELECT gm.group_id, gm.user_id, u.full_name, gm.role, gm.joined_at, gm.left_at
              FROM group_members gm
              INNER JOIN users u ON gm.user_id = u.id
-             WHERE gm.group_id = $1 AND u.deleted_at IS NULL",
+             WHERE gm.group_id = $1 AND gm.left_at IS NULL AND u.deleted_at IS NULL",
         )
         .bind(group_id)
         .fetch_all(executor)
