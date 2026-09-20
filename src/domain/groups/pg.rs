@@ -78,7 +78,7 @@ impl GroupRepository for PostgresGroupRepository {
         group_id: Uuid,
     ) -> Result<Vec<GroupMemberWithUser>, sqlx::Error> {
         sqlx::query_as::<Postgres, GroupMemberWithUser>(
-            "SELECT gm.group_id, gm.user_id, u.full_name, gm.role, gm.joined_at
+            "SELECT gm.group_id, gm.user_id, u.full_name, gm.role, gm.joined_at, gm.left_at
              FROM group_members gm
              INNER JOIN users u ON gm.user_id = u.id
              WHERE gm.group_id = $1 AND u.deleted_at IS NULL",
@@ -155,7 +155,7 @@ impl GroupRepository for PostgresGroupRepository {
             LEFT JOIN user_owes uo ON g.id = uo.group_id
             LEFT JOIN user_sent us ON g.id = us.group_id
             LEFT JOIN user_received ur ON g.id = ur.group_id
-            WHERE gm.user_id = $1 AND g.deleted_at IS NULL
+            WHERE gm.user_id = $1 AND gm.left_at IS NULL AND g.deleted_at IS NULL
             ",
         )
         .bind(user_id)
