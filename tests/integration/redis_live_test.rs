@@ -54,9 +54,9 @@ async fn test_rate_limit_blocks_over_max() {
     let window = Duration::from_secs(60);
 
     for _ in 0..3 {
-        assert!(limiter.check_rate_limit(&key, 3, window).await);
+        assert!(limiter.check_rate_limit(&key, 3, window).await.unwrap());
     }
-    assert!(!limiter.check_rate_limit(&key, 3, window).await);
+    assert!(!limiter.check_rate_limit(&key, 3, window).await.unwrap());
 
     let mut raw = test_client().await;
     let _: () = redis::cmd("DEL").arg(&key).query_async(&mut raw).await.unwrap();
@@ -68,7 +68,7 @@ async fn test_rate_limit_sets_ttl_on_first_hit() {
     let limiter = RedisRateLimiter::new(test_manager().await);
     let key = unique_key("rl-ttl");
 
-    assert!(limiter.check_rate_limit(&key, 100, Duration::from_secs(60)).await);
+    assert!(limiter.check_rate_limit(&key, 100, Duration::from_secs(60)).await.unwrap());
 
     // EXPIRE phải được set ngay lần đầu — không thì key rò rỉ không TTL.
     let mut raw = test_client().await;
@@ -88,12 +88,12 @@ async fn test_mixed_limit_enforces_both_budgets() {
 
     // user budget 2, ip budget 5 — request thứ 3 phải rớt vì user budget.
     let ip = "10.9.9.1";
-    assert!(limiter.check_mixed_limit(&action, user_id, ip, 2, 5, window).await);
-    assert!(limiter.check_mixed_limit(&action, user_id, ip, 2, 5, window).await);
-    assert!(!limiter.check_mixed_limit(&action, user_id, ip, 2, 5, window).await);
+    assert!(limiter.check_mixed_limit(&action, user_id, ip, 2, 5, window).await.unwrap());
+    assert!(limiter.check_mixed_limit(&action, user_id, ip, 2, 5, window).await.unwrap());
+    assert!(!limiter.check_mixed_limit(&action, user_id, ip, 2, 5, window).await.unwrap());
 
     // IP khác nhưng cùng user vẫn rớt — chứng tỏ đếm theo user thật.
-    assert!(!limiter.check_mixed_limit(&action, user_id, "10.9.9.2", 2, 5, window).await);
+    assert!(!limiter.check_mixed_limit(&action, user_id, "10.9.9.2", 2, 5, window).await.unwrap());
 
     let mut raw = test_client().await;
     let user_key = format!("ratelimit:{action}:user:{user_id}");

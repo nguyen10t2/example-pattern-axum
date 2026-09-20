@@ -25,6 +25,7 @@ where
     type Rejection = Infallible;
 
     // Giữ `async` vì trait `FromRequestParts` của axum bắt buộc — body không có `.await` nào.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         Ok(Self(parts.extensions.get::<Self>().map(|l| l.0).unwrap_or_default()))
     }
