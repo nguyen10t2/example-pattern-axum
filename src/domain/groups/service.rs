@@ -304,7 +304,17 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         if target_member.is_none() {
             return Err(AppError::Business(BusinessError::NotGroupMember));
         }
-        self.group_repo.set_member_role(&self.pool, id, target_user_id, role).await?;
+        
+        let mut tx = self.pool.begin().await.map_err(|e| AppError::System(e.into()))?;
+        self.group_repo.set_member_role(&mut *tx, id, target_user_id, role).await?;
+
+        // Nếu chuyển quyền Admin cho người khác (Transfer Admin), bản thân admin hiện tại sẽ về MEMBER
+        if role == GroupRole::ADMIN && target_user_id != current_user_id {
+            self.group_repo.set_member_role(&mut *tx, id, current_user_id, GroupRole::MEMBER).await?;
+        }
+
+        tx.commit().await.map_err(|e| AppError::System(e.into()))?;
+
         invalidate_member_cache(&self.cache, id).await;
         Ok(())
     }
