@@ -204,9 +204,16 @@ impl GroupRepository for MockGroupRepository {
             user_id: data.user_id,
             full_name: "Mock Member".to_string(),
             role: data.role,
+            left_at: None,
             joined_at: Utc::now(),
         });
-        Ok(GroupMemberEntity { group_id: data.group_id, user_id: data.user_id, role: data.role, joined_at: Utc::now() })
+        Ok(GroupMemberEntity {
+            group_id: data.group_id,
+            user_id: data.user_id,
+            role: data.role,
+            left_at: None,
+            joined_at: Utc::now(),
+        })
     }
 
     async fn find_members<'e, E: Executor<'e, Database = Postgres> + Send>(
@@ -262,18 +269,34 @@ impl GroupRepository for MockGroupRepository {
         Ok(items)
     }
 
-    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+    async fn hard_delete(&self, _pool: &sqlx::PgPool, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error> {
+        Ok(Some(GroupEntity {
+            id,
+            name: "Mock".to_string(),
+            description: None,
+            invite_code: None,
+            default_currency: dsa::domain::Currency::VND,
+            deleted_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
+    }
+    async fn leave_group<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + Send>(
         &self,
         _executor: E,
-        id: Uuid,
-    ) -> Result<Option<GroupEntity>, sqlx::Error> {
-        let mut groups = self.groups.lock().await;
-        if let Some(g) = groups.iter_mut().find(|g| g.id == id && g.deleted_at.is_none()) {
-            g.deleted_at = Some(Utc::now());
-            Ok(Some(g.clone()))
-        } else {
-            Ok(None)
-        }
+        _group_id: Uuid,
+        _user_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
+    }
+    async fn set_member_role<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + Send>(
+        &self,
+        _executor: E,
+        _group_id: Uuid,
+        _user_id: Uuid,
+        _role: dsa::domain::GroupRole,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
     }
 }
 

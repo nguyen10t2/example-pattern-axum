@@ -86,6 +86,7 @@ async fn seed_member(repo: &MockGroupRepository, group_id: Uuid, user_id: Uuid, 
         user_id,
         full_name: "Test Member".to_string(),
         role,
+        left_at: None,
         joined_at: Utc::now(),
     });
 }

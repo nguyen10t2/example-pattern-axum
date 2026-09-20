@@ -29,6 +29,7 @@ pub struct GroupMemberEntity {
     pub user_id: Uuid,
     pub role: GroupRole,
     pub joined_at: DateTime<Utc>,
+    pub left_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +46,7 @@ pub struct GroupMemberWithUser {
     pub full_name: String,
     pub role: GroupRole,
     pub joined_at: DateTime<Utc>,
+    pub left_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

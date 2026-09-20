@@ -38,7 +38,11 @@ pub async fn member_entries<GR: GroupRepository>(
         return Ok(cached);
     }
     let members = repo.find_members(pool, group_id).await?;
-    let entries: Vec<MemberEntry> = members.iter().map(|m| MemberEntry { user_id: m.user_id, role: m.role }).collect();
+    let entries: Vec<MemberEntry> = members
+        .iter()
+        .filter(|m| m.left_at.is_none())
+        .map(|m| MemberEntry { user_id: m.user_id, role: m.role })
+        .collect();
     cache.set_best_effort(&key, &entries, CACHE_EXPIRATION).await;
     Ok(entries)
 }

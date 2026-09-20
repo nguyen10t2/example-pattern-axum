@@ -26,6 +26,7 @@ async fn test_expense_creation_and_authorization() {
         user_id: u1,
         full_name: "Alice".to_string(),
         role: GroupRole::ADMIN,
+        left_at: None,
         joined_at: Utc::now(),
     });
     group_repo.members.lock().await.push(GroupMemberWithUser {
@@ -33,6 +34,7 @@ async fn test_expense_creation_and_authorization() {
         user_id: u2,
         full_name: "Bob".to_string(),
         role: GroupRole::MEMBER,
+        left_at: None,
         joined_at: Utc::now(),
     });
 

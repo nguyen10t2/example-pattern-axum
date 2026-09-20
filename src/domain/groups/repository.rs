@@ -51,9 +51,23 @@ pub trait GroupRepository: Send + Sync {
     ) -> Result<Vec<GroupWithBalanceEntity>, sqlx::Error>;
 
     /// Xóa mềm nhóm, trả `None` nếu id không tồn tại.
-    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+    /// Xoá cứng nhóm.
+    /// Đánh dấu user đã rời nhóm.
+    async fn leave_group<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
         executor: E,
-        id: Uuid,
-    ) -> Result<Option<GroupEntity>, sqlx::Error>;
+        group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), sqlx::Error>;
+
+    /// Cập nhật vai trò member.
+    async fn set_member_role<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        group_id: Uuid,
+        user_id: Uuid,
+        role: crate::domain::GroupRole,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn hard_delete(&self, pool: &sqlx::PgPool, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error>;
 }

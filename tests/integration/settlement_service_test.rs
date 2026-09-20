@@ -23,6 +23,7 @@ async fn test_settlement_lifecycle_and_permissions() {
         user_id: sender,
         full_name: "Sender".to_string(),
         role: GroupRole::MEMBER,
+        left_at: None,
         joined_at: Utc::now(),
     });
     group_repo.members.lock().await.push(GroupMemberWithUser {
@@ -30,6 +31,7 @@ async fn test_settlement_lifecycle_and_permissions() {
         user_id: receiver,
         full_name: "Receiver".to_string(),
         role: GroupRole::MEMBER,
+        left_at: None,
         joined_at: Utc::now(),
     });
 
@@ -99,6 +101,7 @@ async fn test_settlement_create_rejects_non_party_member() {
             user_id,
             full_name: name.to_string(),
             role: GroupRole::MEMBER,
+            left_at: None,
             joined_at: Utc::now(),
         });
     }
