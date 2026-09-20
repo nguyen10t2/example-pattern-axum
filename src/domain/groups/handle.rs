@@ -1,7 +1,7 @@
 #![allow(clippy::missing_errors_doc)]
 use axum::{
     Router,
-    extract::{State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
