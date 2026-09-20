@@ -1,5 +1,7 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 
+use crate::config::constants::DEFAULT_SKIP_EMAIL_VERIFICATION;
+
 pub mod constants;
 
 // ---------------------------------------------------------------------------
@@ -467,6 +469,88 @@ pub enum RedisConnectError {
 }
 
 // ---------------------------------------------------------------------------
+// EmailVerificationConfig
+// ---------------------------------------------------------------------------
+
+/// Cấu hình bypass xác thực email qua OTP (chỉ dev/test).
+///
+/// Khi bypass bật, server vẫn nhận field `otp` ở request (giữ API chuẩn prod)
+/// nhưng bỏ qua đối chiếu — client dev gửi mã dummy nào cũng pass.
+/// Production bị chặn lúc boot (fail-fast), không thể bật lén.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmailVerificationConfig {
+    /// Bỏ qua kiểm tra OTP khi `true`.
+    pub skip_verification: bool,
+}
+
+impl EmailVerificationConfig {
+    /// Chế độ chuẩn (prod): bắt buộc OTP.
+    #[must_use]
+    pub const fn disabled() -> Self {
+        Self { skip_verification: false }
+    }
+
+    /// Chế độ bypass (dev/test): nhận `otp` nhưng ignore giá trị.
+    #[must_use]
+    pub const fn bypass() -> Self {
+        Self { skip_verification: true }
+    }
+
+    /// Đang ở chế độ bypass hay không.
+    #[must_use]
+    pub const fn is_bypass(self) -> bool {
+        self.skip_verification
+    }
+
+    /// Đọc từ biến môi trường, chặn bật ở production.
+    ///
+    /// # Environment Variables
+    ///
+    /// | Env var                  | Ý nghĩa                              |
+    /// |--------------------------|--------------------------------------|
+    /// | `SKIP_EMAIL_VERIFICATION`| `true`/`1` để bypass OTP (mặc định tắt) |
+    /// | `APP_ENV`                | `production`/`prod` thì cấm bypass     |
+    ///
+    /// Sync vì chỉ đọc env + so sánh chuỗi trong RAM, không có I/O.
+    ///
+    /// # Errors
+    ///
+    /// Trả [`ConfigError::EmailBypassForbiddenInProduction`] khi
+    /// `SKIP_EMAIL_VERIFICATION=true` mà `APP_ENV=production`/`prod`.
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_raw(
+            std::env::var("SKIP_EMAIL_VERIFICATION").ok().as_deref(),
+            std::env::var("APP_ENV").ok().as_deref(),
+        )
+    }
+
+    /// Dựng từ giá trị env thô (tách riêng để unit test không cần chạm env
+    /// thật — test song song chia sẻ env process nên đọc env trực tiếp sẽ race).
+    ///
+    /// Sync vì chỉ so sánh chuỗi trong RAM, không có I/O.
+    ///
+    /// # Errors
+    ///
+    /// Trả [`ConfigError::EmailBypassForbiddenInProduction`] khi bypass bật
+    /// trong môi trường production.
+    fn from_raw(skip_raw: Option<&str>, app_env_raw: Option<&str>) -> Result<Self, ConfigError> {
+        let skip = skip_raw.map_or(DEFAULT_SKIP_EMAIL_VERIFICATION, |v| v.eq_ignore_ascii_case("true") || v == "1");
+        if skip && is_production_env(app_env_raw) {
+            return Err(ConfigError::EmailBypassForbiddenInProduction);
+        }
+        Ok(Self { skip_verification: skip })
+    }
+}
+
+/// Kiểm tra `APP_ENV` có phải production không (`production`/`prod`,
+/// case-insensitive).
+///
+/// Sync vì chỉ so sánh chuỗi trong RAM, không có I/O.
+fn is_production_env(app_env_raw: Option<&str>) -> bool {
+    app_env_raw.is_some_and(|v| v.eq_ignore_ascii_case("production") || v.eq_ignore_ascii_case("prod"))
+}
+
+// ---------------------------------------------------------------------------
 // ConfigError
 // ---------------------------------------------------------------------------
 
@@ -474,6 +558,8 @@ pub enum RedisConnectError {
 pub enum ConfigError {
     #[error("DATABASE_URL is required but was not set")]
     MissingDatabaseUrl,
+    #[error("SKIP_EMAIL_VERIFICATION=true is forbidden when APP_ENV=production")]
+    EmailBypassForbiddenInProduction,
 }
 
 // ---------------------------------------------------------------------------
@@ -568,5 +654,51 @@ mod tests {
         assert_eq!(cfg.url, "redis://localhost:6380");
         assert_eq!(cfg.connection_timeout, std::time::Duration::from_secs(1));
         assert_eq!(cfg.response_timeout, std::time::Duration::from_secs(1));
+    }
+
+    // -- EmailVerificationConfig ----------------------------------------------
+
+    #[test]
+    fn test_email_verification_constructors() {
+        assert!(!EmailVerificationConfig::disabled().is_bypass());
+        assert!(EmailVerificationConfig::bypass().is_bypass());
+    }
+
+    #[test]
+    fn test_email_verification_from_raw_defaults_off() {
+        let cfg = EmailVerificationConfig::from_raw(None, None).unwrap();
+        assert!(!cfg.is_bypass());
+    }
+
+    #[test]
+    fn test_email_verification_from_raw_accepts_true_and_1() {
+        for raw in ["true", "TRUE", "True", "1"] {
+            let cfg = EmailVerificationConfig::from_raw(Some(raw), Some("development")).unwrap();
+            assert!(cfg.is_bypass(), "expected bypass for {raw}");
+        }
+    }
+
+    #[test]
+    fn test_email_verification_from_raw_rejects_other_values() {
+        for raw in ["false", "0", "yes", "on", ""] {
+            let cfg = EmailVerificationConfig::from_raw(Some(raw), None).unwrap();
+            assert!(!cfg.is_bypass(), "expected strict for {raw}");
+        }
+    }
+
+    #[test]
+    fn test_email_verification_from_raw_forbids_production() {
+        for env in ["production", "PRODUCTION", "prod", "Prod"] {
+            let err = EmailVerificationConfig::from_raw(Some("true"), Some(env)).unwrap_err();
+            assert!(matches!(err, ConfigError::EmailBypassForbiddenInProduction));
+        }
+    }
+
+    #[test]
+    fn test_email_verification_from_raw_allows_bypass_in_non_production() {
+        for env in [None, Some("development"), Some("test"), Some("staging")] {
+            let cfg = EmailVerificationConfig::from_raw(Some("1"), env).unwrap();
+            assert!(cfg.is_bypass());
+        }
     }
 }

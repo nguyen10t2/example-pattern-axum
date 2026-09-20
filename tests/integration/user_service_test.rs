@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::common::{MockUserRepository, test_argon2, test_cache, test_jwt_config, test_pool};
 use dsa::{
-    config::constants::MAX_OTP_ATTEMPTS,
+    config::{EmailVerificationConfig, constants::MAX_OTP_ATTEMPTS},
     domain::users::{
         entity::NewUserEntity,
         repository::UserRepository,
@@ -21,6 +21,12 @@ use dsa::{
 };
 
 fn create_test_user_service() -> (UserService<MockUserRepository>, Arc<dsa::utils::cache::Cache>, MockUserRepository) {
+    create_test_user_service_with_config(EmailVerificationConfig::disabled())
+}
+
+fn create_test_user_service_with_config(
+    email_verification: EmailVerificationConfig,
+) -> (UserService<MockUserRepository>, Arc<dsa::utils::cache::Cache>, MockUserRepository) {
     let repo = MockUserRepository::default();
     let cache = test_cache();
     let argon2 = test_argon2();
@@ -33,6 +39,7 @@ fn create_test_user_service() -> (UserService<MockUserRepository>, Arc<dsa::util
         jwt_config,
         Mailer::new(8, &EmailConfig::disabled()),
         test_pool(),
+        email_verification,
     );
     (service, cache, repo)
 }
@@ -305,4 +312,62 @@ async fn test_reset_otp_invalidated_after_max_attempts() {
     // Mã đúng cũng rớt vì entry đã bị xóa sau đủ số lần sai.
     assert!(service.verify_otp("reset-cap@example.com", &entry.code, OtpPurpose::Reset).await.is_err());
     assert!(cache.get::<OtpEntry>("forgot_otp:reset-cap@example.com").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn test_signup_bypass_ignores_otp_field() {
+    let (service, cache, _) = create_test_user_service_with_config(EmailVerificationConfig::bypass());
+
+    // Không cần request-otp trước; không có gì trong cache.
+    assert!(cache.get::<OtpEntry>("otp:bypass-signup@example.com").await.unwrap().is_none());
+
+    let user = service
+        .sign_up(SignUpRequest {
+            email: "bypass-signup@example.com".to_string(),
+            full_name: "Bypass User".to_string(),
+            password: "password123".to_string(),
+            otp: "000000".to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(user.email, "bypass-signup@example.com");
+}
+
+#[tokio::test]
+async fn test_verify_otp_bypass_accepts_any_code_both_purposes() {
+    let (service, _, _) = create_test_user_service_with_config(EmailVerificationConfig::bypass());
+
+    assert!(service.verify_otp("any@example.com", "000000", OtpPurpose::Signup).await.is_ok());
+    assert!(service.verify_otp("any@example.com", "000000", OtpPurpose::Reset).await.is_ok());
+}
+
+#[tokio::test]
+async fn test_request_otp_bypass_skips_cache_and_mail() {
+    let (service, cache, _) = create_test_user_service_with_config(EmailVerificationConfig::bypass());
+
+    service.request_otp("bypass-req@example.com", Lang::Vi).await.unwrap();
+    assert!(cache.get::<OtpEntry>("otp:bypass-req@example.com").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn test_forgot_password_bypass_resets_without_otp() {
+    let (service, cache, repo) = create_test_user_service_with_config(EmailVerificationConfig::bypass());
+    seed_user_for_reset(&repo, "bypass-reset@example.com").await;
+
+    service.request_forgot_password_otp("bypass-reset@example.com", Lang::Vi).await.unwrap();
+    assert!(cache.get::<OtpEntry>("forgot_otp:bypass-reset@example.com").await.unwrap().is_none());
+
+    service
+        .reset_password(ResetPasswordRequest {
+            email: "bypass-reset@example.com".to_string(),
+            otp: "000000".to_string(),
+            new_password: "bypassed123".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let signin = service
+        .sign_in(SignInRequest { email: "bypass-reset@example.com".to_string(), password: "bypassed123".to_string() })
+        .await;
+    assert!(signin.is_ok());
 }

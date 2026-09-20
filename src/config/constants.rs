@@ -153,6 +153,14 @@ pub const MIN_JWT_SECRET_LEN: usize = 32;
 pub const JWT_LEEWAY_SECS: u64 = 30;
 
 // ---------------------------------------------------------------------------
+// Email verification bypass (dev/test only)
+// ---------------------------------------------------------------------------
+
+/// Mặc định tắt bypass OTP (`SKIP_EMAIL_VERIFICATION`).
+/// Chỉ bật ở dev/test; production bị chặn lúc boot (fail-fast).
+pub const DEFAULT_SKIP_EMAIL_VERIFICATION: bool = false;
+
+// ---------------------------------------------------------------------------
 // OAuth
 // ---------------------------------------------------------------------------
 

@@ -4,7 +4,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    config::constants::MAX_SESSIONS_PER_USER,
+    config::{EmailVerificationConfig, constants::MAX_SESSIONS_PER_USER},
     domain::{
         Currency,
         users::{
@@ -44,10 +44,11 @@ pub struct UserService<R: UserRepository> {
     jwt_config: JwtConfig,
     mailer: Mailer,
     pool: PgPool,
+    email_verification: EmailVerificationConfig,
 }
 
 impl<R: UserRepository> UserService<R> {
-    /// Ghép repo, cache, JWT và mailer thành service user.
+    /// Ghép repo, cache, JWT, mailer và cấu hình xác thực email thành service user.
     pub const fn new(
         repo: R,
         cache: Arc<Cache>,
@@ -55,11 +56,15 @@ impl<R: UserRepository> UserService<R> {
         jwt_config: JwtConfig,
         mailer: Mailer,
         pool: PgPool,
+        email_verification: EmailVerificationConfig,
     ) -> Self {
-        Self { repo, cache, argon2, jwt_config, mailer, pool }
+        Self { repo, cache, argon2, jwt_config, mailer, pool, email_verification }
     }
 
     /// Gửi OTP đăng ký qua email, lưu cache 2 phút.
+    ///
+    /// Khi bypass bật (`SKIP_EMAIL_VERIFICATION=true`), bỏ qua sinh OTP và gửi
+    /// mail — field `otp` ở `/signup` vẫn nhận nhưng bị ignore.
     ///
     /// # Errors
     ///
@@ -68,6 +73,11 @@ impl<R: UserRepository> UserService<R> {
         let existing_user = self.repo.find_by_email(&self.pool, email).await?;
         if existing_user.is_some() {
             return Err(AppError::Business(BusinessError::UserAlreadyExists));
+        }
+
+        if self.email_verification.is_bypass() {
+            warn!(email = %email, "OTP bypass enabled; skipping signup OTP email");
+            return Ok(());
         }
 
         let otp = generate_otp();
@@ -79,12 +89,17 @@ impl<R: UserRepository> UserService<R> {
 
     /// Kiểm tra OTP mà không tiêu thụ (cho FE verify sớm).
     ///
-    /// Sai quá `MAX_OTP_ATTEMPTS` lần thì hủy mã, bắt xin lại.
+    /// Sai quá `MAX_OTP_ATTEMPTS` lần thì hủy mã, bắt xin lại. Khi bypass bật,
+    /// chấp nhận mọi mã cho cả 2 flow signup/reset mà không chạm cache.
     ///
     /// # Errors
     ///
     /// Trả `InvalidOtp` khi mã sai, hết hạn hoặc đã bị hủy do sai nhiều lần.
     pub async fn verify_otp(&self, email: &str, otp: &str, purpose: OtpPurpose) -> Result<(), AppError> {
+        if self.email_verification.is_bypass() {
+            warn!(email = %email, purpose = ?purpose, "OTP bypass enabled; accepting without check");
+            return Ok(());
+        }
         let key = match purpose {
             OtpPurpose::Signup => otp::signup_key(email),
             OtpPurpose::Reset => otp::reset_key(email),
@@ -94,12 +109,20 @@ impl<R: UserRepository> UserService<R> {
 
     /// Tạo user mới sau khi đối chiếu OTP.
     ///
+    /// Khi bypass bật, bỏ qua đối chiếu OTP (vẫn nhận field `otp` để giữ API
+    /// chuẩn prod) và dọn key OTP cũ nếu còn sót (best-effort, không fail signup).
+    ///
     /// # Errors
     ///
     /// Trả `InvalidOtp` khi OTP sai/hết hạn, `Conflict` khi email trùng, lỗi hash/DB khi ghi.
     pub async fn sign_up(&self, data: SignUpRequest) -> Result<UserResponse, AppError> {
         let key = otp::signup_key(&data.email);
-        otp::check(&self.cache, &key, &data.otp).await?;
+        let bypass = self.email_verification.is_bypass();
+        if bypass {
+            warn!(email = %data.email, "OTP bypass enabled; creating user without OTP check");
+        } else {
+            otp::check(&self.cache, &key, &data.otp).await?;
+        }
 
         let password_hash = hash_password(&self.argon2, data.password).await?;
         let user_id = Uuid::now_v7();
@@ -124,7 +147,13 @@ impl<R: UserRepository> UserService<R> {
             .await
             .map_err(|err| map_unique_violation(err, &[("email", &new_user.email)]))?;
 
-        self.cache.delete(&key).await?;
+        if bypass {
+            // Không có OTP nào được tạo ở bypass mode; dọn key cũ sót lại thì
+            // best-effort để Redis lỗi không fail signup oan.
+            self.cache.delete_best_effort(&key).await;
+        } else {
+            self.cache.delete(&key).await?;
+        }
 
         info!(email = %created_user.email, user_id = %created_user.id, "User signed up");
         Ok(UserMapper::to_response(created_user))
@@ -431,6 +460,9 @@ impl<R: UserRepository> UserService<R> {
 
     /// Gửi OTP quên mật khẩu. Luôn `Ok` kể cả email lạ để chống dò email.
     ///
+    /// Khi bypass bật, bỏ qua sinh OTP và gửi mail (vẫn giữ check user trước
+    /// để giữ timing/flow gần prod nhất có thể).
+    ///
     /// # Errors
     ///
     /// Luôn `Ok` — không có lỗi nghiệp vụ.
@@ -438,6 +470,11 @@ impl<R: UserRepository> UserService<R> {
         let user = self.repo.find_by_email(&self.pool, email).await?;
         if user.is_none() {
             return Ok(()); // Prevent email enumeration
+        }
+
+        if self.email_verification.is_bypass() {
+            warn!(email = %email, "OTP bypass enabled; skipping forgot-password OTP email");
+            return Ok(());
         }
 
         let otp = generate_otp();
@@ -449,12 +486,19 @@ impl<R: UserRepository> UserService<R> {
 
     /// Reset password bằng OTP, thu hồi mọi session đang active.
     ///
+    /// Khi bypass bật, bỏ qua đối chiếu OTP (vẫn nhận field `otp` để giữ API
+    /// chuẩn prod).
+    ///
     /// # Errors
     ///
     /// Trả `InvalidOtp` khi OTP sai/hết hạn, `UserNotFound` khi email không tồn tại.
     pub async fn reset_password(&self, data: ResetPasswordRequest) -> Result<(), AppError> {
         let key = otp::reset_key(&data.email);
-        otp::check(&self.cache, &key, &data.otp).await?;
+        if self.email_verification.is_bypass() {
+            warn!(email = %data.email, "OTP bypass enabled; resetting password without OTP check");
+        } else {
+            otp::check(&self.cache, &key, &data.otp).await?;
+        }
 
         let user = self.repo.find_by_email(&self.pool, &data.email).await?;
         let user = user.ok_or_else(|| AppError::Business(BusinessError::UserNotFound(data.email.clone())))?;
