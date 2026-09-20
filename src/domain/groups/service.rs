@@ -104,6 +104,10 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             Ok(_) => {
                 info!(group_id = %group.id, user_id = %user_id, "User joined group via invite code");
                 self.cache.delete_best_effort(&group_summary_key(group.id)).await;
+                // Members thay đổi nên membership cache-first (`member_entries`) phải
+                // xóa theo, không thì user vừa join mở detail bị `NotGroupMember` oan
+                // tới hết TTL (list đọc thẳng DB nên vẫn hiện nhóm → mismatch).
+                invalidate_member_cache(&self.cache, group.id).await;
             }
             Err(err) => {
                 // If unique violation (already joined), ignore conflict like in TS

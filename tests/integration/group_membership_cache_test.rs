@@ -67,6 +67,19 @@ async fn seed_group(repo: &MockGroupRepository, id: Uuid) {
     });
 }
 
+async fn seed_group_with_invite(repo: &MockGroupRepository, id: Uuid, code: &str) {
+    repo.groups.lock().await.push(GroupEntity {
+        id,
+        name: "Test Group".to_string(),
+        description: None,
+        invite_code: Some(code.to_string()),
+        default_currency: Currency::VND,
+        deleted_at: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    });
+}
+
 async fn seed_member(repo: &MockGroupRepository, group_id: Uuid, user_id: Uuid, role: GroupRole) {
     repo.members.lock().await.push(GroupMemberWithUser {
         group_id,
@@ -118,4 +131,26 @@ async fn test_add_member_invalidates_membership_cache() {
 
     // Không invalidate thì dòng này vẫn Err (cache cũ) — đây chính là điều cần chứng minh.
     assert!(service.ensure_membership(group_id, newcomer_id).await.is_ok());
+}
+
+#[tokio::test]
+async fn test_join_by_invite_code_invalidates_membership_cache() {
+    let (service, group_repo, _, _, user_repo) = test_group_service();
+    let group_id = Uuid::now_v7();
+    let newcomer_id = Uuid::now_v7();
+    seed_user(&user_repo, newcomer_id, "joiner@example.com").await;
+    seed_group_with_invite(&group_repo, group_id, "JOINME123").await;
+
+    // Ai đó mở detail trước → cache members (chưa có newcomer).
+    assert!(matches!(
+        service.ensure_membership(group_id, newcomer_id).await,
+        Err(AppError::Business(BusinessError::NotGroupMember))
+    ));
+
+    service.join_by_invite_code("JOINME123", newcomer_id).await.unwrap();
+
+    // Hồi chưa fix: dòng này vẫn Err vì cache cũ — join phải invalidate members.
+    assert!(service.ensure_membership(group_id, newcomer_id).await.is_ok());
+    // List đọc thẳng DB cũng thấy nhóm (đúng hành vi user báo: list có, detail 403).
+    assert!(service.find_all_by_user(newcomer_id).await.unwrap().iter().any(|g| g.id == group_id));
 }

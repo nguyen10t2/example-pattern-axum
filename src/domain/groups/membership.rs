@@ -2,8 +2,8 @@
 //!
 //! Tiết kiệm 1–2 round trip DB mỗi request: hầu hết endpoint đều check membership qua
 //! `find_members` full-row, trong khi authorize chỉ cần id + role. Trade-off: staleness
-//! tối đa bằng TTL nếu sót điểm invalidate — mọi điểm mutate (add member, delete group)
-//! đều phải gọi [`invalidate_member_cache`].
+//! tối đa bằng TTL nếu sót điểm invalidate — mọi điểm mutate members (create group,
+//! add member, join by invite code, delete group) đều phải gọi [`invalidate_member_cache`].
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -43,7 +43,8 @@ pub async fn member_entries<GR: GroupRepository>(
     Ok(entries)
 }
 
-/// Xóa cache membership — gọi ở mọi điểm mutate members (add/remove member, delete group).
+/// Xóa cache membership — gọi ở mọi điểm mutate members (create group, add member,
+/// join by invite code, delete group).
 ///
 /// Best-effort (không critical): Redis lỗi thì warn và stale tối đa bằng TTL.
 /// Để `async` vì xóa Redis là I/O mạng thật.

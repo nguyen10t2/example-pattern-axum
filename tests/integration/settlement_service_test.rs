@@ -8,6 +8,7 @@ use dsa::domain::{
     settlements::{request::CreateSettlementRequest, service::SettlementService},
     shared::PaginationQuery,
 };
+use dsa::errors::{AppError, BusinessError};
 
 #[tokio::test]
 async fn test_settlement_lifecycle_and_permissions() {
@@ -82,4 +83,43 @@ async fn test_settlement_lifecycle_and_permissions() {
     // Verify cancelled
     let after_cancel = service.find_by_id(settlement.id, sender).await;
     assert!(after_cancel.is_err());
+}
+
+#[tokio::test]
+async fn test_settlement_create_rejects_non_party_member() {
+    let group_id = Uuid::now_v7();
+    let sender = Uuid::now_v7();
+    let receiver = Uuid::now_v7();
+    let third_member = Uuid::now_v7();
+
+    let group_repo = MockGroupRepository::default();
+    for (user_id, name) in [(sender, "Sender"), (receiver, "Receiver"), (third_member, "Third")] {
+        group_repo.members.lock().await.push(GroupMemberWithUser {
+            group_id,
+            user_id,
+            full_name: name.to_string(),
+            role: GroupRole::MEMBER,
+            joined_at: Utc::now(),
+        });
+    }
+
+    let service = SettlementService::new(MockSettlementRepository::default(), group_repo, test_cache(), test_pool());
+
+    let input = || CreateSettlementRequest {
+        group_id,
+        sender_id: sender,
+        receiver_id: receiver,
+        amount: 50,
+        currency: Currency::VND,
+        settled_at: None,
+    };
+
+    // Member thứ 3 (không phải sender/receiver) ghi hộ → 403, chống giả mạo.
+    assert!(matches!(
+        service.create(input(), third_member).await,
+        Err(AppError::Business(BusinessError::NotSettlementParty))
+    ));
+
+    // Receiver tự ghi → OK.
+    service.create(input(), receiver).await.unwrap();
 }

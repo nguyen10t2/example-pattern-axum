@@ -36,9 +36,13 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
 
     /// Ghi nhận một giao dịch trả nợ, xóa cache summary nhóm.
     ///
+    /// Chỉ sender hoặc receiver được ghi (kể cả ADMIN ngoài cuộc cũng không) —
+    /// member thứ 3 ghi hộ là giả mạo giao dịch của 2 người khác.
+    ///
     /// # Errors
     ///
-    /// Trả `NotGroupMember` khi ngoài nhóm, `UserNotInGroup` khi sender/receiver ngoài nhóm.
+    /// Trả `NotGroupMember` khi ngoài nhóm, `NotSettlementParty` khi actor không
+    /// phải sender/receiver, `UserNotInGroup` khi sender/receiver ngoài nhóm.
     pub async fn create(
         &self,
         data: CreateSettlementRequest,
@@ -49,6 +53,10 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
 
         if !member_ids.contains(&current_user_id) {
             return Err(AppError::Business(BusinessError::NotGroupMember));
+        }
+
+        if current_user_id != data.sender_id && current_user_id != data.receiver_id {
+            return Err(AppError::Business(BusinessError::NotSettlementParty));
         }
 
         if !member_ids.contains(&data.sender_id) || !member_ids.contains(&data.receiver_id) {
