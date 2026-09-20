@@ -180,7 +180,13 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             .iter()
             .map(|s| SettlementForEngine { sender_id: s.sender_id, receiver_id: s.receiver_id, amount: s.amount })
             .collect();
-        let balances = DebtEngine::calculate_net_balances(&user_ids, &engine_expenses, &engine_settlements);
+        let all_balances = DebtEngine::calculate_net_balances(&user_ids, &engine_expenses, &engine_settlements);
+        // Chỉ giữ lại balances của những active members trong nhóm (loại bỏ người đã rời nhóm vì net_amount đã = 0 và không còn trong user_name_map)
+        let active_user_ids: std::collections::HashSet<Uuid> = user_ids.into_iter().collect();
+        let balances: Vec<_> = all_balances
+            .into_iter()
+            .filter(|b| active_user_ids.contains(&b.user_id))
+            .collect();
         let suggestions = DebtEngine::simplify_debts(&balances);
         let summary = GroupSummaryResponse {
             id: group.id,
