@@ -45,8 +45,6 @@ pub const OTP_EXPIRATION: u64 = 2 * 60; // 2 minutes
 pub const JWT_ACCESS_TOKEN_EXPIRATION_SECS: usize = 15 * 60;
 /// Tuổi thọ refresh-token, giây (7 ngày, khớp [`REFRESH_TOKEN_EXPIRATION`]).
 pub const JWT_REFRESH_TOKEN_EXPIRATION_SECS: usize = 7 * 24 * 60 * 60;
-/// Secret fallback khi thiếu `JWT_SECRET` (chỉ dev).
-pub const DEFAULT_JWT_SECRET: &str = "default_splitdebt_jwt_secret_key_12345";
 /// Issuer fallback khi thiếu `JWT_ISSUER`.
 pub const DEFAULT_JWT_ISSUER: &str = "default-issuer";
 /// Audience fallback khi thiếu `JWT_AUDIENCE`.
@@ -139,8 +137,8 @@ pub const FORGOT_OTP_KEY_PREFIX: &str = "forgot_otp:";
 
 /// Tên cookie chứa refresh token.
 pub const REFRESH_COOKIE_NAME: &str = "refreshCookie";
-/// Gắn cờ `Secure` cho cookie khi thiếu `COOKIE_SECURE` (mặc định dev HTTP).
-pub const DEFAULT_COOKIE_SECURE: bool = false;
+/// Gắn cờ `Secure` cho cookie khi thiếu `COOKIE_SECURE` (mặc định an toàn).
+pub const DEFAULT_COOKIE_SECURE: bool = true;
 
 // ---------------------------------------------------------------------------
 // JWT hardening

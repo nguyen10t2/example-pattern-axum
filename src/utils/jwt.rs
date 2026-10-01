@@ -1,12 +1,13 @@
 use crate::{
     config::constants::{
-        DEFAULT_JWT_AUDIENCE, DEFAULT_JWT_ISSUER, DEFAULT_JWT_SECRET, JWT_ACCESS_TOKEN_EXPIRATION_SECS,
-        JWT_LEEWAY_SECS, JWT_REFRESH_TOKEN_EXPIRATION_SECS, MIN_JWT_SECRET_LEN,
+        DEFAULT_JWT_AUDIENCE, DEFAULT_JWT_ISSUER, JWT_ACCESS_TOKEN_EXPIRATION_SECS, JWT_LEEWAY_SECS,
+        JWT_REFRESH_TOKEN_EXPIRATION_SECS, MIN_JWT_SECRET_LEN,
     },
     errors::{AppError, BusinessError},
 };
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -61,8 +62,12 @@ pub struct JwtConfig {
 
 impl Default for JwtConfig {
     fn default() -> Self {
+        let mut secret = [0_u8; MIN_JWT_SECRET_LEN];
+        OsRng.fill_bytes(&mut secret);
         Self {
-            secret: std::env::var("JWT_SECRET").unwrap_or_else(|_| DEFAULT_JWT_SECRET.to_string()),
+            // `Default` is useful for isolated tests and library consumers, but must
+            // never fall back to a repository-wide signing key.
+            secret: base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, secret),
             issuer: std::env::var("JWT_ISSUER").unwrap_or_else(|_| DEFAULT_JWT_ISSUER.to_string()),
             audience: std::env::var("JWT_AUDIENCE").unwrap_or_else(|_| DEFAULT_JWT_AUDIENCE.to_string()),
             access_token_expiration_secs: JWT_ACCESS_TOKEN_EXPIRATION_SECS,
