@@ -183,10 +183,7 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         let all_balances = DebtEngine::calculate_net_balances(&user_ids, &engine_expenses, &engine_settlements);
         // Chỉ giữ lại balances của những active members trong nhóm (loại bỏ người đã rời nhóm vì net_amount đã = 0 và không còn trong user_name_map)
         let active_user_ids: std::collections::HashSet<Uuid> = user_ids.into_iter().collect();
-        let balances: Vec<_> = all_balances
-            .into_iter()
-            .filter(|b| active_user_ids.contains(&b.user_id))
-            .collect();
+        let balances: Vec<_> = all_balances.into_iter().filter(|b| active_user_ids.contains(&b.user_id)).collect();
         let suggestions = DebtEngine::simplify_debts(&balances);
         let summary = GroupSummaryResponse {
             id: group.id,
@@ -304,20 +301,14 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         target_user_id: Uuid,
         role: GroupRole,
     ) -> Result<(), AppError> {
-        let ((), members) = tokio::try_join!(
-            self.ensure_admin(id, current_user_id),
-            async {
-                self.group_repo
-                    .find_members(&self.pool, id)
-                    .await
-                    .map_err(AppError::from)
-            }
-        )?;
+        let ((), members) = tokio::try_join!(self.ensure_admin(id, current_user_id), async {
+            self.group_repo.find_members(&self.pool, id).await.map_err(AppError::from)
+        })?;
         let target_member = members.iter().find(|m| m.user_id == target_user_id && m.left_at.is_none());
         if target_member.is_none() {
             return Err(AppError::Business(BusinessError::NotGroupMember));
         }
-        
+
         let mut tx = self.pool.begin().await.map_err(|e| AppError::System(e.into()))?;
         self.group_repo.set_member_role(&mut *tx, id, target_user_id, role).await?;
 
@@ -338,18 +329,8 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     pub async fn leave_group(&self, id: Uuid, current_user_id: Uuid) -> Result<(), AppError> {
         // Chạy song song tìm group_with_balance của user và danh sách members của nhóm để tối ưu roundtrip I/O
         let (groups, members) = tokio::try_join!(
-            async {
-                self.group_repo
-                    .find_all_by_user(&self.pool, current_user_id)
-                    .await
-                    .map_err(AppError::from)
-            },
-            async {
-                self.group_repo
-                    .find_members(&self.pool, id)
-                    .await
-                    .map_err(AppError::from)
-            }
+            async { self.group_repo.find_all_by_user(&self.pool, current_user_id).await.map_err(AppError::from) },
+            async { self.group_repo.find_members(&self.pool, id).await.map_err(AppError::from) }
         )?;
 
         let group_info = groups.iter().find(|g| g.id == id);
