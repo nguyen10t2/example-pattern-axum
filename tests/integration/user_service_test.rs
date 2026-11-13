@@ -5,7 +5,7 @@ use crate::common::{MockUserRepository, test_argon2, test_cache, test_jwt_config
 use dsa::{
     config::{EmailVerificationConfig, constants::MAX_OTP_ATTEMPTS},
     domain::users::{
-        entity::NewUserEntity,
+        entity::{NewUserEntity, UpdateUserEntity},
         repository::UserRepository,
         request::{ChangePasswordRequest, OtpPurpose, ResetPasswordRequest, SignInRequest, SignUpRequest},
         service::UserService,
@@ -189,6 +189,48 @@ async fn test_google_oauth_signin() {
     // Sign in again with same google account should link and succeed
     let tokens2 = service.sign_in_with_google(google_user).await.unwrap();
     assert!(!tokens2.access_token.is_empty());
+}
+
+#[tokio::test]
+async fn inactive_users_cannot_sign_in_or_refresh_existing_sessions() {
+    let (service, _, repo) = create_test_user_service();
+    let password = "password123";
+    let user_id = Uuid::now_v7();
+    repo.create(
+        &test_pool(),
+        &NewUserEntity {
+            id: user_id,
+            full_name: "Inactive User".to_string(),
+            email: "inactive@example.com".to_string(),
+            email_verified: true,
+            password_hash: Some(hash_password(&test_argon2(), password.to_string()).await.unwrap()),
+            google_id: None,
+            avatar_url: None,
+            phone: None,
+            phone_verified: false,
+            preferred_currency: dsa::domain::Currency::VND,
+            is_active: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let tokens = service
+        .sign_in(SignInRequest { email: "inactive@example.com".to_string(), password: password.to_string() })
+        .await
+        .unwrap();
+    repo.update(&test_pool(), user_id, &UpdateUserEntity { is_active: Some(false), ..Default::default() })
+        .await
+        .unwrap();
+
+    assert!(!service.is_active(user_id).await.unwrap());
+    assert!(service.refresh(Some(&tokens.refresh_token)).await.is_err());
+    assert!(
+        service
+            .sign_in(SignInRequest { email: "inactive@example.com".to_string(), password: password.to_string() })
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

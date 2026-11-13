@@ -38,7 +38,7 @@ pub struct SignUpRequest {
     #[validate(length(min = 1, max = 255))]
     #[serde(rename = "fullName")]
     pub full_name: String,
-    #[validate(length(min = 6))]
+    #[validate(length(min = 6, max = 128))]
     pub password: String,
     #[validate(length(min = 6, max = 6))]
     pub otp: String,
@@ -48,16 +48,16 @@ pub struct SignUpRequest {
 pub struct SignInRequest {
     #[validate(email)]
     pub email: String,
-    #[validate(length(min = 6))]
+    #[validate(length(min = 6, max = 128))]
     pub password: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct ChangePasswordRequest {
-    #[validate(length(min = 6))]
+    #[validate(length(min = 6, max = 128))]
     #[serde(rename = "oldPassword")]
     pub old_password: String,
-    #[validate(length(min = 6))]
+    #[validate(length(min = 6, max = 128))]
     #[serde(rename = "newPassword")]
     pub new_password: String,
 }
@@ -74,7 +74,7 @@ pub struct ResetPasswordRequest {
     pub email: String,
     #[validate(length(min = 6, max = 6))]
     pub otp: String,
-    #[validate(length(min = 6))]
+    #[validate(length(min = 6, max = 128))]
     #[serde(rename = "newPassword")]
     pub new_password: String,
 }
