@@ -7,7 +7,9 @@ use dsa::{
     domain::users::{
         entity::NewUserEntity,
         repository::UserRepository,
-        request::{ChangePasswordRequest, OtpPurpose, ResetPasswordRequest, SignInRequest, SignUpRequest},
+        request::{
+            ChangePasswordRequest, OtpPurpose, ResetPasswordRequest, SignInRequest, SignUpRequest, UpdateUserRequest,
+        },
         service::UserService,
     },
     utils::{
@@ -249,12 +251,13 @@ async fn test_signup_attempts_share_counter_with_verify() {
     assert!(service.verify_otp("shared@example.com", &entry.code, OtpPurpose::Signup).await.is_ok());
 }
 
-async fn seed_user_for_reset(repo: &MockUserRepository, email: &str) {
+async fn seed_user_for_reset(repo: &MockUserRepository, email: &str) -> Uuid {
     let hash = hash_password(&test_argon2(), "oldpass123".to_string()).await.unwrap();
+    let user_id = Uuid::now_v7();
     repo.create(
         &test_pool(),
         &NewUserEntity {
-            id: Uuid::now_v7(),
+            id: user_id,
             full_name: "Reset User".to_string(),
             email: email.to_string(),
             email_verified: true,
@@ -269,6 +272,7 @@ async fn seed_user_for_reset(repo: &MockUserRepository, email: &str) {
     )
     .await
     .unwrap();
+    user_id
 }
 
 #[tokio::test]
@@ -370,4 +374,46 @@ async fn test_forgot_password_bypass_resets_without_otp() {
         .sign_in(SignInRequest { email: "bypass-reset@example.com".to_string(), password: "bypassed123".to_string() })
         .await;
     assert!(signin.is_ok());
+}
+
+#[tokio::test]
+async fn test_deactivate_revokes_sessions_and_blocks_signin() {
+    let (service, _, repo) = create_test_user_service();
+    let email = "deactivate@example.com";
+    let user_id = seed_user_for_reset(&repo, email).await;
+
+    let tokens =
+        service.sign_in(SignInRequest { email: email.to_string(), password: "oldpass123".to_string() }).await.unwrap();
+
+    service
+        .update(
+            user_id,
+            UpdateUserRequest { full_name: None, is_active: Some(false), phone: None, preferred_currency: None },
+        )
+        .await
+        .unwrap();
+
+    // Session cũ bị thu hồi.
+    assert!(service.refresh(Some(&tokens.refresh_token)).await.is_err());
+    // Tài khoản khóa không đăng nhập lại được.
+    assert!(
+        service.sign_in(SignInRequest { email: email.to_string(), password: "oldpass123".to_string() }).await.is_err()
+    );
+}
+
+#[tokio::test]
+async fn test_delete_revokes_sessions() {
+    let (service, _, repo) = create_test_user_service();
+    let email = "deleted-user@example.com";
+    let user_id = seed_user_for_reset(&repo, email).await;
+
+    let tokens =
+        service.sign_in(SignInRequest { email: email.to_string(), password: "oldpass123".to_string() }).await.unwrap();
+
+    service.delete(user_id).await.unwrap();
+
+    assert!(service.refresh(Some(&tokens.refresh_token)).await.is_err());
+    assert!(
+        service.sign_in(SignInRequest { email: email.to_string(), password: "oldpass123".to_string() }).await.is_err()
+    );
 }

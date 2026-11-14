@@ -171,6 +171,11 @@ impl<R: UserRepository> UserService<R> {
             return Err(AppError::Business(BusinessError::InvalidCredentials));
         };
 
+        if !user.is_active {
+            warn!(email = %data.email, user_id = %user.id, "Failed sign-in attempt: Account disabled");
+            return Err(AppError::Business(BusinessError::InvalidCredentials));
+        }
+
         let Some(password_hash) = &user.password_hash else {
             return Err(AppError::Business(BusinessError::InvalidCredentials));
         };
@@ -198,6 +203,9 @@ impl<R: UserRepository> UserService<R> {
 
         let user = match self.repo.find_by_google_id(&self.pool, &google_user.sub).await? {
             Some(mut user) => {
+                if !user.is_active {
+                    return Err(AppError::Business(BusinessError::InvalidCredentials));
+                }
                 if let Some(ref avatar) = google_user.picture
                     && user.avatar_url.as_ref() != Some(avatar)
                 {
@@ -214,6 +222,9 @@ impl<R: UserRepository> UserService<R> {
             }
             None => {
                 if let Some(user) = self.repo.find_by_email(&self.pool, &google_user.email).await? {
+                    if !user.is_active {
+                        return Err(AppError::Business(BusinessError::InvalidCredentials));
+                    }
                     let updated = self
                         .repo
                         .update(
@@ -309,6 +320,14 @@ impl<R: UserRepository> UserService<R> {
 
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::Business(BusinessError::InvalidSession))?;
 
+        // Tài khoản bị xoá/khóa thì token còn hạn cũng không được xoay — revoke
+        // family rồi báo InvalidSession (fail-closed, không để session sống tiếp).
+        let active_user = self.repo.find_by_id(&self.pool, user_id).await?;
+        if !active_user.is_some_and(|user| user.is_active) {
+            self.revoke_sessions(&claims.sub).await?;
+            return Err(AppError::Business(BusinessError::InvalidSession));
+        }
+
         let new_jti = Uuid::now_v7().to_string();
         // Ký trước, xoay sau: xoay lỗi (503) thì session cũ còn nguyên, client retry được.
         let new_access_token = self.jwt_config.gen_access_token(user_id)?;
@@ -328,22 +347,22 @@ impl<R: UserRepository> UserService<R> {
         };
 
         if self.cache.rotate_refresh_token(&rotation).await? == RotationOutcome::Stale {
-            self.revoke_family(&claims.sub).await?;
+            self.revoke_sessions(&claims.sub).await?;
             return Err(AppError::Business(BusinessError::InvalidSession));
         }
 
         Ok(TokensResponse { access_token: new_access_token, refresh_token: new_refresh_token })
     }
 
-    /// Thu hồi toàn bộ sessions của subject (dùng khi phát hiện replay refresh token).
+    /// Thu hồi toàn bộ sessions của subject (sign-out all, replay, đổi/xoá tài khoản).
     ///
     /// Để `async` vì đọc + xóa Redis là I/O mạng thật.
     ///
     /// # Errors
     ///
     /// Trả lỗi hệ thống (cache unavailable → 503) khi Redis lỗi — fail-closed:
-    /// không revoke được thì không được báo `InvalidSession` nhẹ nhàng.
-    async fn revoke_family(&self, subject: &str) -> Result<(), AppError> {
+    /// không revoke được thì không được báo thành công nhẹ nhàng.
+    async fn revoke_sessions(&self, subject: &str) -> Result<(), AppError> {
         let session_key = session_list_key(subject);
         let active_sessions: Vec<String> = self.cache.get(&session_key).await?.unwrap_or_default();
         let mut gone: Vec<String> = active_sessions.into_iter().map(|jti| refresh_token_key(&jti)).collect();
@@ -385,10 +404,14 @@ impl<R: UserRepository> UserService<R> {
 
     /// Cập nhật profile rồi refresh cache user.
     ///
+    /// Khi `isActive = false` (khoá tài khoản), thu hồi toàn bộ session để token
+    /// cũ không dùng tiếp được — fail-closed như `change_password`.
+    ///
     /// # Errors
     ///
-    /// Trả lỗi DB khi ghi thất bại.
+    /// Trả lỗi DB khi ghi thất bại, lỗi hệ thống khi không revoke được session.
     pub async fn update(&self, id: Uuid, data: UpdateUserRequest) -> Result<UserResponse, AppError> {
+        let deactivate = data.is_active == Some(false);
         let update_entity = UpdateUserEntity {
             full_name: data.full_name,
             is_active: data.is_active,
@@ -400,22 +423,28 @@ impl<R: UserRepository> UserService<R> {
         let updated_user = self.repo.update(&self.pool, id, &update_entity).await?;
         let response = UserMapper::to_response(updated_user);
 
+        if deactivate {
+            self.revoke_sessions(&id.to_string()).await?;
+        }
+
         let key = user_profile_key(id);
         self.cache.set_best_effort(&key, &response, CACHE_EXPIRATION).await;
 
         Ok(response)
     }
 
-    /// Xóa mềm user rồi xóa cache.
+    /// Xóa mềm user rồi xóa cache, thu hồi toàn bộ session của user.
     ///
     /// # Errors
     ///
-    /// Trả `UserNotFound` khi id không tồn tại.
+    /// Trả `UserNotFound` khi id không tồn tại, lỗi hệ thống khi không revoke được session.
     pub async fn delete(&self, id: Uuid) -> Result<(), AppError> {
         let result = self.repo.soft_delete(&self.pool, id).await?;
         if result.is_none() {
             return Err(AppError::Business(BusinessError::UserNotFound(id.to_string())));
         }
+
+        self.revoke_sessions(&id.to_string()).await?;
 
         let key = user_profile_key(id);
         self.cache.delete_best_effort(&key).await;
@@ -447,12 +476,8 @@ impl<R: UserRepository> UserService<R> {
 
         // Invalidate active sessions — fail-closed: không đọc được sessions thì
         // không được báo đổi pass thành công trong khi session cũ vẫn sống.
-        let session_key = session_list_key(&user_id.to_string());
-        let active_sessions: Vec<String> = self.cache.get(&session_key).await?.unwrap_or_default();
-
-        let mut gone = vec![user_profile_key(user_id), session_key];
-        gone.extend(active_sessions.into_iter().map(|jti| refresh_token_key(&jti)));
-        self.cache.delete_many(&gone).await?;
+        self.revoke_sessions(&user_id.to_string()).await?;
+        self.cache.delete(&user_profile_key(user_id)).await?;
 
         info!(user_id = %user_id, "User changed password");
         Ok(())
@@ -509,12 +534,8 @@ impl<R: UserRepository> UserService<R> {
             .await?;
 
         // Invalidate all active sessions — fail-closed như `change_password`.
-        let session_key = session_list_key(&user.id.to_string());
-        let active_sessions: Vec<String> = self.cache.get(&session_key).await?.unwrap_or_default();
-
-        let mut gone = vec![key, user_profile_key(user.id), session_key];
-        gone.extend(active_sessions.into_iter().map(|jti| refresh_token_key(&jti)));
-        self.cache.delete_many(&gone).await?;
+        self.revoke_sessions(&user.id.to_string()).await?;
+        self.cache.delete_many(&[key, user_profile_key(user.id)]).await?;
 
         info!(user_id = %user.id, "User reset password");
         Ok(())
