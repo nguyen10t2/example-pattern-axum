@@ -404,17 +404,15 @@ impl<R: UserRepository> UserService<R> {
 
     /// Cập nhật profile rồi refresh cache user.
     ///
-    /// Khi `isActive = false` (khoá tài khoản), thu hồi toàn bộ session để token
-    /// cũ không dùng tiếp được — fail-closed như `change_password`.
+    /// `is_active` chỉ được đổi bởi admin/ops (không nhận từ client) — để user tự
+    /// bật lại thì lệnh khoá tài khoản vô nghĩa.
     ///
     /// # Errors
     ///
-    /// Trả lỗi DB khi ghi thất bại, lỗi hệ thống khi không revoke được session.
+    /// Trả lỗi DB khi ghi thất bại.
     pub async fn update(&self, id: Uuid, data: UpdateUserRequest) -> Result<UserResponse, AppError> {
-        let deactivate = data.is_active == Some(false);
         let update_entity = UpdateUserEntity {
             full_name: data.full_name,
-            is_active: data.is_active,
             phone: data.phone.map(Some),
             preferred_currency: data.preferred_currency,
             ..Default::default()
@@ -422,10 +420,6 @@ impl<R: UserRepository> UserService<R> {
 
         let updated_user = self.repo.update(&self.pool, id, &update_entity).await?;
         let response = UserMapper::to_response(updated_user);
-
-        if deactivate {
-            self.revoke_sessions(&id.to_string()).await?;
-        }
 
         let key = user_profile_key(id);
         self.cache.set_best_effort(&key, &response, CACHE_EXPIRATION).await;

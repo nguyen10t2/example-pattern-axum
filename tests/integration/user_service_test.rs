@@ -7,9 +7,7 @@ use dsa::{
     domain::users::{
         entity::NewUserEntity,
         repository::UserRepository,
-        request::{
-            ChangePasswordRequest, OtpPurpose, ResetPasswordRequest, SignInRequest, SignUpRequest, UpdateUserRequest,
-        },
+        request::{ChangePasswordRequest, OtpPurpose, ResetPasswordRequest, SignInRequest, SignUpRequest},
         service::UserService,
     },
     utils::{
@@ -377,7 +375,7 @@ async fn test_forgot_password_bypass_resets_without_otp() {
 }
 
 #[tokio::test]
-async fn test_deactivate_revokes_sessions_and_blocks_signin() {
+async fn test_deactivated_user_cannot_refresh_or_signin() {
     let (service, _, repo) = create_test_user_service();
     let email = "deactivate@example.com";
     let user_id = seed_user_for_reset(&repo, email).await;
@@ -385,13 +383,14 @@ async fn test_deactivate_revokes_sessions_and_blocks_signin() {
     let tokens =
         service.sign_in(SignInRequest { email: email.to_string(), password: "oldpass123".to_string() }).await.unwrap();
 
-    service
-        .update(
-            user_id,
-            UpdateUserRequest { full_name: None, is_active: Some(false), phone: None, preferred_currency: None },
-        )
-        .await
-        .unwrap();
+    // Khoá tài khoản chỉ còn qua ops/DB — user không tự đổi `is_active` được nữa.
+    repo.update(
+        &test_pool(),
+        user_id,
+        &dsa::domain::users::entity::UpdateUserEntity { is_active: Some(false), ..Default::default() },
+    )
+    .await
+    .unwrap();
 
     // Session cũ bị thu hồi.
     assert!(service.refresh(Some(&tokens.refresh_token)).await.is_err());
