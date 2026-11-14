@@ -16,7 +16,8 @@ use crate::{
         DEFAULT_COOKIE_SECURE, DEFAULT_FRONTEND_URL, OAUTH_COOKIE_MAX_AGE_SECS, OAUTH_SUCCESS_QUERY,
         RATE_LIMIT_CHANGE_PASSWORD_IP_MAX, RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_EMAIL_WINDOW,
         RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_REQUEST_OTP_IP_MAX,
-        RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW, REFRESH_COOKIE_NAME,
+        RATE_LIMIT_SIGNIN_EMAIL_MAX, RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW,
+        REFRESH_COOKIE_NAME,
     },
     domain::users::request::{
         ChangePasswordRequest, ForgotPasswordOtpRequest, GoogleCallbackQuery, RequestOtpRequest, ResetPasswordRequest,
@@ -249,8 +250,17 @@ pub async fn handle_forgot_password_otp(
 pub async fn handle_reset_password(
     State(state): State<AppState>,
     RequestLang(lang): RequestLang,
+    headers: HeaderMap,
     ValidatedJson(body): ValidatedJson<ResetPasswordRequest>,
 ) -> Result<SuccessResponse<()>, AppError> {
+    // Cùng ngân sách IP với verify-otp: mã chỉ có 5 lần thử nhưng vẫn chặn
+    // việc spam endpoint bằng IP xoay vòng.
+    let ip = extract_client_ip(&headers);
+    if !state.rate_limiter.check_ip_limit("reset-password", &ip, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW).await
+    {
+        return Err(AppError::Business(BusinessError::TooManyRequests));
+    }
+
     state.user_service.reset_password(body).await?;
     Ok(SuccessResponse::message_only(t_simple("PASSWORD_RESET", lang)))
 }
@@ -269,6 +279,15 @@ pub async fn handle_signin(
 ) -> Result<(CookieJar, SuccessResponse<AuthResponse>), AppError> {
     let ip = extract_client_ip(&headers);
     if !state.rate_limiter.check_ip_limit("signin", &ip, RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW).await {
+        return Err(AppError::Business(BusinessError::TooManyRequests));
+    }
+    // IP có thể bị xoay (hoặc XFF cấu hình sai) — chặn thêm theo email để
+    // brute-force một tài khoản vẫn bị giới hạn.
+    if !state
+        .rate_limiter
+        .check_email_limit("signin", &body.email, RATE_LIMIT_SIGNIN_EMAIL_MAX, RATE_LIMIT_WINDOW)
+        .await
+    {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
 

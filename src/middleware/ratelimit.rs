@@ -110,12 +110,50 @@ impl RedisRateLimiter {
     }
 }
 
-/// Lấy IP client (ưu tiên `X-Forwarded-For`), fallback loopback.
+/// Số hop proxy tin cậy, đọc 1 lần lúc boot từ `TRUSTED_PROXY_HOPS`.
+static TRUSTED_PROXY_HOPS: LazyLock<usize> = LazyLock::new(|| {
+    std::env::var("TRUSTED_PROXY_HOPS")
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(crate::config::constants::DEFAULT_TRUSTED_PROXY_HOPS)
+});
+
+/// Lấy IP client từ `X-Forwarded-For`, đếm `TRUSTED_PROXY_HOPS` hop từ phải.
+///
+/// Proxy tin cậy append IP client vào cuối header, nên hop cuối là giá trị duy nhất
+/// client không tự đặt được. Thiếu header thì fallback loopback (dev/local).
 #[must_use]
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
+    extract_client_ip_with_hops(headers, *TRUSTED_PROXY_HOPS)
+}
+
+/// Bản thuần (không đọc env) để test được hop count.
+fn extract_client_ip_with_hops(headers: &axum::http::HeaderMap, hops: usize) -> String {
+    let hops = hops.max(1);
     headers
         .get("x-forwarded-for")
         .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.split(',').next())
+        .and_then(|s| s.rsplit(',').nth(hops - 1))
         .map_or_else(|| "127.0.0.1".to_string(), |s| s.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderMap;
+
+    use super::extract_client_ip_with_hops;
+
+    #[test]
+    fn test_extract_client_ip_uses_last_trusted_hop() {
+        let mut headers = HeaderMap::new();
+        // Client tự đặt "1.2.3.4"; proxy append IP thật → chỉ IP cuối là tin được.
+        headers.insert("x-forwarded-for", "1.2.3.4, 5.6.7.8".parse().unwrap());
+        assert_eq!(extract_client_ip_with_hops(&headers, 1), "5.6.7.8");
+        assert_eq!(extract_client_ip_with_hops(&headers, 2), "1.2.3.4");
+    }
+
+    #[test]
+    fn test_extract_client_ip_falls_back_to_loopback() {
+        assert_eq!(extract_client_ip_with_hops(&HeaderMap::new(), 1), "127.0.0.1");
+    }
 }
