@@ -22,12 +22,16 @@ pub trait GroupRepository: Send + Sync {
         id: Uuid,
     ) -> Result<Option<GroupEntity>, sqlx::Error>;
 
-    /// Thêm thành viên vào nhóm.
+    /// Thêm thành viên vào nhóm; `None` khi user đã là thành viên đang active.
+    ///
+    /// Upsert theo `(group_id, user_id)`: người đã rời (`left_at` khác `NULL`) được
+    /// vào lại với role mới; người đang active giữ nguyên role (không bị invite code
+    /// cũ hạ quyền).
     async fn add_member<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
         executor: E,
         data: &NewGroupMemberEntity,
-    ) -> Result<GroupMemberEntity, sqlx::Error>;
+    ) -> Result<Option<GroupMemberEntity>, sqlx::Error>;
 
     /// Liệt kê thành viên kèm user của nhóm.
     async fn find_members<'e, E: Executor<'e, Database = Postgres> + Send>(

@@ -59,16 +59,19 @@ impl GroupRepository for PostgresGroupRepository {
         &self,
         executor: E,
         data: &NewGroupMemberEntity,
-    ) -> Result<GroupMemberEntity, sqlx::Error> {
+    ) -> Result<Option<GroupMemberEntity>, sqlx::Error> {
         sqlx::query_as::<Postgres, GroupMemberEntity>(
             "INSERT INTO group_members (group_id, user_id, role)
              VALUES ($1, $2, $3)
+             ON CONFLICT (group_id, user_id) DO UPDATE
+                SET left_at = NULL, role = EXCLUDED.role, joined_at = now()
+                WHERE group_members.left_at IS NOT NULL
              RETURNING *",
         )
         .bind(data.group_id)
         .bind(data.user_id)
         .bind(data.role)
-        .fetch_one(executor)
+        .fetch_optional(executor)
         .await
     }
 

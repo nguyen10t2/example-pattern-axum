@@ -72,7 +72,8 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         self.group_repo
             .add_member(&mut *tx, &new_member)
             .await
-            .map_err(|err| map_unique_violation(err, &[("group_members", "already joined")]))?;
+            .map_err(|err| map_unique_violation(err, &[("group_members", "already joined")]))?
+            .ok_or(sqlx::Error::RowNotFound)?;
         tx.commit().await?;
         info!(group_id = %group.id, name = %group.name, creator_id = %creator_id, "Group created");
         Ok(GroupMapper::to_response(group))
@@ -88,8 +89,10 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
             return Err(AppError::Business(BusinessError::InvalidInviteCode));
         };
         let new_member = NewGroupMemberEntity { group_id: group.id, user_id, role: GroupRole::MEMBER };
+        // `add_member` upsert: `None` = đã là member đang active (giữ nguyên role,
+        // không hạ quyền admin đang có). Người đã rời (`left_at`) được join lại.
         match self.group_repo.add_member(&self.pool, &new_member).await {
-            Ok(_) => {
+            Ok(Some(_)) => {
                 info!(group_id = %group.id, user_id = %user_id, "User joined group via invite code");
                 self.cache.delete_best_effort(&group_summary_key(group.id)).await;
                 // Members thay đổi nên membership cache-first (`member_entries`) phải
@@ -97,16 +100,8 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
                 // tới hết TTL (list đọc thẳng DB nên vẫn hiện nhóm → mismatch).
                 invalidate_member_cache(&self.cache, group.id).await;
             }
-            Err(err) => {
-                // If unique violation (already joined), ignore conflict like in TS
-                let is_unique_err = match &err {
-                    sqlx::Error::Database(db_err) => db_err.code().as_deref() == Some("23505"),
-                    _ => false,
-                };
-                if !is_unique_err {
-                    return Err(AppError::from(err));
-                }
-            }
+            Ok(None) => {}
+            Err(err) => return Err(AppError::from(err)),
         }
         Ok(GroupMapper::to_response(group))
     }
@@ -231,14 +226,17 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
     ) -> Result<GroupMemberResponse, AppError> {
         self.find_by_id(group_id, None).await?; // Ensure group exists
         self.ensure_admin(group_id, current_user_id).await?;
+        if data.role == Some(GroupRole::OWNER) {
+            return Err(AppError::Business(BusinessError::BadRequest("OWNER role is not assignable".into())));
+        }
         let member = self
             .group_repo
             .add_member(
                 &self.pool,
                 &NewGroupMemberEntity { group_id, user_id: data.user_id, role: data.role.unwrap_or(GroupRole::MEMBER) },
             )
-            .await
-            .map_err(|err| map_unique_violation(err, &[("group_members", "already joined")]))?;
+            .await?
+            .ok_or_else(|| AppError::Business(BusinessError::UserAlreadyInGroup))?;
         let user = self.user_repo.find_by_id(&self.pool, data.user_id).await?;
         let full_name = user.map_or_else(|| "Unknown Member".to_string(), |u| u.full_name);
         self.cache.delete_best_effort(&group_summary_key(group_id)).await;
@@ -301,12 +299,29 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         target_user_id: Uuid,
         role: GroupRole,
     ) -> Result<(), AppError> {
+        // OWNER có trong DB nhưng không phải quyền admin (`ensure_admin` chỉ nhận
+        // ADMIN) — nhận từ client thì nhóm có thể rơi vào trạng thái không ai quản trị.
+        if role == GroupRole::OWNER {
+            return Err(AppError::Business(BusinessError::BadRequest("OWNER role is not assignable".into())));
+        }
+
         let ((), members) = tokio::try_join!(self.ensure_admin(id, current_user_id), async {
             self.group_repo.find_members(&self.pool, id).await.map_err(AppError::from)
         })?;
         let target_member = members.iter().find(|m| m.user_id == target_user_id && m.left_at.is_none());
         if target_member.is_none() {
             return Err(AppError::Business(BusinessError::NotGroupMember));
+        }
+
+        // Nhóm phải luôn còn ít nhất 1 ADMIN, kể cả khi admin tự giáng chức mình.
+        let other_admins = members
+            .iter()
+            .filter(|m| m.left_at.is_none() && m.role == GroupRole::ADMIN && m.user_id != target_user_id)
+            .count();
+        if role != GroupRole::ADMIN && other_admins == 0 {
+            return Err(AppError::Business(BusinessError::ValidationError(
+                "Group must keep at least one Admin".into(),
+            )));
         }
 
         let mut tx = self.pool.begin().await.map_err(|e| AppError::System(e.into()))?;
@@ -349,22 +364,23 @@ impl<GR: GroupRepository, ER: ExpenseRepository, SR: SettlementRepository, UR: U
         let Some(my_member) = my_member else {
             return Err(AppError::Business(BusinessError::NotGroupMember));
         };
+
+        // Người cuối cùng rời nhóm (bất kể role) thì xoá nhóm: để lại nhóm 0 thành
+        // viên / 0 admin với invite code còn sống thì không ai dọn được nữa.
+        if active_members.len() == 1 {
+            self.group_repo.hard_delete(&self.pool, id).await?;
+            self.cache.delete_best_effort(&group_summary_key(id)).await;
+            invalidate_member_cache(&self.cache, id).await;
+            return Ok(());
+        }
+
         if my_member.role == GroupRole::ADMIN {
-            if active_members.len() > 1 {
-                let other_admins = active_members
-                    .iter()
-                    .filter(|m| m.user_id != current_user_id && m.role == GroupRole::ADMIN)
-                    .count();
-                if other_admins == 0 {
-                    return Err(AppError::Business(BusinessError::ValidationError(
-                        "You are the only Admin. Please promote another member before leaving.".into(),
-                    )));
-                }
-            } else {
-                self.group_repo.hard_delete(&self.pool, id).await?;
-                self.cache.delete_best_effort(&group_summary_key(id)).await;
-                invalidate_member_cache(&self.cache, id).await;
-                return Ok(());
+            let other_admins =
+                active_members.iter().filter(|m| m.user_id != current_user_id && m.role == GroupRole::ADMIN).count();
+            if other_admins == 0 {
+                return Err(AppError::Business(BusinessError::ValidationError(
+                    "You are the only Admin. Please promote another member before leaving.".into(),
+                )));
             }
         }
         self.group_repo.leave_group(&self.pool, id, current_user_id).await?;
