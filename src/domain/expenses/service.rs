@@ -100,7 +100,20 @@ impl<ER: ExpenseRepository, GR: GroupRepository> ExpenseService<ER, GR> {
     ///
     /// Trả lỗi membership hoặc lỗi strategy khi split sai.
     async fn validate_creation(&self, data: &CreateExpenseRequest, created_by_id: Uuid) -> Result<(), AppError> {
-        let members = member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id).await?;
+        let (members, group) =
+            tokio::try_join!(member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id), async {
+                self.group_repo.find_by_id(&self.pool, data.group_id).await.map_err(AppError::from)
+            })?;
+        let group = group.ok_or(AppError::Business(BusinessError::GroupNotFound))?;
+
+        // DebtEngine cộng trừ số nguyên thô, không quy đổi tỉ giá — trộn currency
+        // trong một nhóm là làm sai toàn bộ số dư.
+        if data.currency != group.default_currency {
+            return Err(AppError::Business(BusinessError::BadRequest(
+                "Currency must match group default currency".into(),
+            )));
+        }
+
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
         if !member_ids.contains(&created_by_id) {

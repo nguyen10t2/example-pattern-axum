@@ -82,8 +82,24 @@ pub struct PercentageSplitStrategy;
 
 impl SplitStrategy for PercentageSplitStrategy {
     fn validate(&self, context: &SplitContext) -> Result<(), AppError> {
-        let total_pct: i32 = context.shares.iter().map(|s| s.share_percentage.unwrap_or(0)).sum();
+        // Số tiền vẫn phải khớp tổng: `DebtEngine` chia nợ theo `share_amount`, nếu chỉ
+        // check % thì client gửi share_amount tuỳ ý và làm lệch cả sổ nợ của nhóm.
+        validate_sum(context)?;
+
         // Input is percentage * 100 (e.g. 10000 for 100%)
+        let mut total_pct: i32 = 0;
+        for share in &context.shares {
+            // Thiếu % không được coi là 0 — 0% hợp lệ nhưng phải khai báo tường minh.
+            let pct = share
+                .share_percentage
+                .ok_or_else(|| AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())))?;
+            if !(0..=10000).contains(&pct) {
+                return Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())));
+            }
+            total_pct = total_pct
+                .checked_add(pct)
+                .ok_or_else(|| AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())))?;
+        }
         if total_pct != 10000 {
             return Err(AppError::Business(BusinessError::BadRequest("BAD_REQUEST".to_string())));
         }
@@ -224,5 +240,36 @@ mod tests {
             shares: vec![SplitShareInput { user_id: Uuid::now_v7(), share_amount: 500, share_percentage: Some(4000) }],
         };
         assert!(strategy.validate(&bad_ctx).is_err());
+    }
+
+    #[test]
+    fn test_percentage_split_rejects_amounts_not_matching_total() {
+        let strategy = SplitStrategyFactory::get_strategy(&SplitType::PERCENTAGE);
+        // % đúng 100% nhưng tổng tiền chia = 0 → tạo khoản phải thu khống.
+        let ctx = SplitContext {
+            total_amount: 1_000_000,
+            shares: vec![
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 0, share_percentage: Some(6000) },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 0, share_percentage: Some(4000) },
+            ],
+        };
+        assert!(strategy.validate(&ctx).is_err());
+    }
+
+    #[test]
+    fn test_percentage_split_rejects_missing_or_out_of_range_percentage() {
+        let strategy = SplitStrategyFactory::get_strategy(&SplitType::PERCENTAGE);
+        let mut ctx = SplitContext {
+            total_amount: 100,
+            shares: vec![
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 40, share_percentage: None },
+                SplitShareInput { user_id: Uuid::now_v7(), share_amount: 60, share_percentage: Some(6000) },
+            ],
+        };
+        assert!(strategy.validate(&ctx).is_err());
+
+        ctx.shares[0].share_percentage = Some(-5000);
+        ctx.shares[1].share_percentage = Some(15000);
+        assert!(strategy.validate(&ctx).is_err());
     }
 }
