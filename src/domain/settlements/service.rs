@@ -48,7 +48,23 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
         data: CreateSettlementRequest,
         current_user_id: Uuid,
     ) -> Result<SettlementResponse, AppError> {
-        let members = member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id).await?;
+        if data.sender_id == data.receiver_id {
+            return Err(AppError::Business(BusinessError::BadRequest("Sender and receiver must differ".into())));
+        }
+
+        let (members, group) =
+            tokio::try_join!(member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id), async {
+                self.group_repo.find_by_id(&self.pool, data.group_id).await.map_err(AppError::from)
+            })?;
+        let group = group.ok_or(AppError::Business(BusinessError::GroupNotFound))?;
+
+        // Như expense: DebtEngine không quy đổi tỉ giá, trộn currency là sai sổ nợ.
+        if data.currency != group.default_currency {
+            return Err(AppError::Business(BusinessError::BadRequest(
+                "Currency must match group default currency".into(),
+            )));
+        }
+
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
         if !member_ids.contains(&current_user_id) {

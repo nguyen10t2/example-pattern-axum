@@ -1,7 +1,7 @@
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::common::{MockGroupRepository, MockSettlementRepository, test_cache, test_pool};
+use crate::common::{MockGroupRepository, MockSettlementRepository, seed_group, test_cache, test_pool};
 use dsa::domain::{
     Currency, GroupRole,
     groups::entity::GroupMemberWithUser,
@@ -18,6 +18,7 @@ async fn test_settlement_lifecycle_and_permissions() {
     let outsider = Uuid::now_v7();
 
     let group_repo = MockGroupRepository::default();
+    seed_group(&group_repo, group_id, Currency::VND).await;
     group_repo.members.lock().await.push(GroupMemberWithUser {
         group_id,
         user_id: sender,
@@ -95,6 +96,7 @@ async fn test_settlement_create_rejects_non_party_member() {
     let third_member = Uuid::now_v7();
 
     let group_repo = MockGroupRepository::default();
+    seed_group(&group_repo, group_id, Currency::VND).await;
     for (user_id, name) in [(sender, "Sender"), (receiver, "Receiver"), (third_member, "Third")] {
         group_repo.members.lock().await.push(GroupMemberWithUser {
             group_id,
@@ -125,4 +127,50 @@ async fn test_settlement_create_rejects_non_party_member() {
 
     // Receiver tự ghi → OK.
     service.create(input(), receiver).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_settlement_rejects_self_transfer_and_currency_mismatch() {
+    let group_id = Uuid::now_v7();
+    let user = Uuid::now_v7();
+    let other = Uuid::now_v7();
+    let group_repo = MockGroupRepository::default();
+    seed_group(&group_repo, group_id, Currency::VND).await;
+    for (user_id, name) in [(user, "User"), (other, "Other")] {
+        group_repo.members.lock().await.push(GroupMemberWithUser {
+            group_id,
+            user_id,
+            full_name: name.to_string(),
+            role: GroupRole::MEMBER,
+            left_at: None,
+            joined_at: Utc::now(),
+        });
+    }
+
+    let service = SettlementService::new(MockSettlementRepository::default(), group_repo, test_cache(), test_pool());
+
+    // sender == receiver: no-op record, không được ghi vào sổ.
+    let self_transfer = CreateSettlementRequest {
+        group_id,
+        sender_id: user,
+        receiver_id: user,
+        amount: 50,
+        currency: Currency::VND,
+        settled_at: None,
+    };
+    assert!(matches!(service.create(self_transfer, user).await, Err(AppError::Business(BusinessError::BadRequest(_)))));
+
+    // Nhóm VND mà ghi settlement USD → lệch sổ nợ (engine không quy đổi).
+    let wrong_currency = CreateSettlementRequest {
+        group_id,
+        sender_id: user,
+        receiver_id: other,
+        amount: 50,
+        currency: Currency::USD,
+        settled_at: None,
+    };
+    assert!(matches!(
+        service.create(wrong_currency, user).await,
+        Err(AppError::Business(BusinessError::BadRequest(_)))
+    ));
 }
