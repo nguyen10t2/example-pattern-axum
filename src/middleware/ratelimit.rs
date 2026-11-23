@@ -192,3 +192,24 @@ mod tests {
         assert_eq!(extract_client_ip(&headers, peer_ip), peer_ip);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderMap;
+
+    use super::extract_client_ip_with_hops;
+
+    #[test]
+    fn test_extract_client_ip_uses_last_trusted_hop() {
+        let mut headers = HeaderMap::new();
+        // Client tự đặt "1.2.3.4"; proxy append IP thật → chỉ IP cuối là tin được.
+        headers.insert("x-forwarded-for", "1.2.3.4, 5.6.7.8".parse().unwrap());
+        assert_eq!(extract_client_ip_with_hops(&headers, 1), "5.6.7.8");
+        assert_eq!(extract_client_ip_with_hops(&headers, 2), "1.2.3.4");
+    }
+
+    #[test]
+    fn test_extract_client_ip_falls_back_to_loopback() {
+        assert_eq!(extract_client_ip_with_hops(&HeaderMap::new(), 1), "127.0.0.1");
+    }
+}

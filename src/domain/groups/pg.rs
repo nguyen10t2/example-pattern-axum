@@ -59,16 +59,19 @@ impl GroupRepository for PostgresGroupRepository {
         &self,
         executor: E,
         data: &NewGroupMemberEntity,
-    ) -> Result<GroupMemberEntity, sqlx::Error> {
+    ) -> Result<Option<GroupMemberEntity>, sqlx::Error> {
         sqlx::query_as::<Postgres, GroupMemberEntity>(
             "INSERT INTO group_members (group_id, user_id, role)
              VALUES ($1, $2, $3)
+             ON CONFLICT (group_id, user_id) DO UPDATE
+                SET left_at = NULL, role = EXCLUDED.role, joined_at = now()
+                WHERE group_members.left_at IS NOT NULL
              RETURNING *",
         )
         .bind(data.group_id)
         .bind(data.user_id)
         .bind(data.role)
-        .fetch_one(executor)
+        .fetch_optional(executor)
         .await
     }
 
@@ -78,10 +81,10 @@ impl GroupRepository for PostgresGroupRepository {
         group_id: Uuid,
     ) -> Result<Vec<GroupMemberWithUser>, sqlx::Error> {
         sqlx::query_as::<Postgres, GroupMemberWithUser>(
-            "SELECT gm.group_id, gm.user_id, u.full_name, gm.role, gm.joined_at
+            "SELECT gm.group_id, gm.user_id, u.full_name, gm.role, gm.joined_at, gm.left_at
              FROM group_members gm
              INNER JOIN users u ON gm.user_id = u.id
-             WHERE gm.group_id = $1 AND u.deleted_at IS NULL",
+             WHERE gm.group_id = $1 AND gm.left_at IS NULL AND u.deleted_at IS NULL",
         )
         .bind(group_id)
         .fetch_all(executor)
@@ -155,7 +158,7 @@ impl GroupRepository for PostgresGroupRepository {
             LEFT JOIN user_owes uo ON g.id = uo.group_id
             LEFT JOIN user_sent us ON g.id = us.group_id
             LEFT JOIN user_received ur ON g.id = ur.group_id
-            WHERE gm.user_id = $1 AND g.deleted_at IS NULL
+            WHERE gm.user_id = $1 AND gm.left_at IS NULL AND g.deleted_at IS NULL
             ",
         )
         .bind(user_id)
@@ -163,19 +166,56 @@ impl GroupRepository for PostgresGroupRepository {
         .await
     }
 
-    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+    async fn leave_group<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
         executor: E,
-        id: Uuid,
-    ) -> Result<Option<GroupEntity>, sqlx::Error> {
-        sqlx::query_as::<Postgres, GroupEntity>(
-            "UPDATE groups
-             SET deleted_at = now()
-             WHERE id = $1 AND deleted_at IS NULL
-             RETURNING *",
-        )
-        .bind(id)
-        .fetch_optional(executor)
-        .await
+        group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE group_members SET left_at = now() WHERE group_id = $1 AND user_id = $2")
+            .bind(group_id)
+            .bind(user_id)
+            .execute(executor)
+            .await?;
+        Ok(())
+    }
+
+    async fn set_member_role<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        group_id: Uuid,
+        user_id: Uuid,
+        role: crate::domain::GroupRole,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE group_members SET role = $1 WHERE group_id = $2 AND user_id = $3")
+            .bind(role)
+            .bind(group_id)
+            .bind(user_id)
+            .execute(executor)
+            .await?;
+        Ok(())
+    }
+
+    async fn hard_delete(&self, pool: &sqlx::PgPool, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+
+        sqlx::query("DELETE FROM expense_shares WHERE expense_id IN (SELECT id FROM expenses WHERE group_id = $1)")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query("DELETE FROM expenses WHERE group_id = $1").bind(id).execute(&mut *tx).await?;
+
+        sqlx::query("DELETE FROM settlements WHERE group_id = $1").bind(id).execute(&mut *tx).await?;
+
+        sqlx::query("DELETE FROM group_members WHERE group_id = $1").bind(id).execute(&mut *tx).await?;
+
+        let group = sqlx::query_as::<Postgres, GroupEntity>("DELETE FROM groups WHERE id = $1 RETURNING *")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        Ok(group)
     }
 }

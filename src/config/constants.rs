@@ -63,6 +63,8 @@ pub const RATE_LIMIT_REQUEST_OTP_IP_MAX: u32 = 3;
 pub const RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX: u32 = 3;
 /// Số lần `signin` tối đa mỗi IP mỗi cửa sổ.
 pub const RATE_LIMIT_SIGNIN_IP_MAX: u32 = 5;
+/// Số lần `signin` tối đa mỗi email mỗi cửa sổ (chặn brute-force khi IP bị xoay/XFF giả).
+pub const RATE_LIMIT_SIGNIN_EMAIL_MAX: u32 = 10;
 /// Số lần `change-password` tối đa mỗi user mỗi cửa sổ.
 pub const RATE_LIMIT_CHANGE_PASSWORD_USER_MAX: u32 = 3;
 /// Số lần `change-password` tối đa mỗi IP mỗi cửa sổ.
@@ -83,6 +85,13 @@ pub const RATE_LIMIT_REQUEST_OTP_EMAIL_MAX: u32 = 3;
 pub const RATE_LIMIT_EMAIL_WINDOW: Duration = Duration::from_secs(3600);
 /// Số lần nhập sai OTP tối đa trước khi hủy mã.
 pub const MAX_OTP_ATTEMPTS: u32 = 5;
+
+/// Số hop proxy tin cậy khi đọc `X-Forwarded-For` (đếm từ phải).
+///
+/// Phải khớp topology deploy: 1 = đứng sau đúng 1 proxy (Render/nginx/Cloudflare).
+/// Proxy append IP thật vào cuối header nên chỉ hop cuối mới không giả mạo được —
+/// lấy phần tử đầu tiên (cách cũ) cho phép client tự đặt IP để né rate-limit.
+pub const DEFAULT_TRUSTED_PROXY_HOPS: usize = 1;
 
 // ---------------------------------------------------------------------------
 // Cookies
@@ -149,6 +158,14 @@ pub const DEFAULT_COOKIE_SECURE: bool = true;
 pub const MIN_JWT_SECRET_LEN: usize = 32;
 /// Dung sai lệch đồng hồ khi verify `exp`/`iat`, giây.
 pub const JWT_LEEWAY_SECS: u64 = 30;
+
+// ---------------------------------------------------------------------------
+// Email verification bypass (dev/test only)
+// ---------------------------------------------------------------------------
+
+/// Mặc định tắt bypass OTP (`SKIP_EMAIL_VERIFICATION`).
+/// Chỉ bật ở dev/test; production bị chặn lúc boot (fail-fast).
+pub const DEFAULT_SKIP_EMAIL_VERIFICATION: bool = false;
 
 // ---------------------------------------------------------------------------
 // OAuth

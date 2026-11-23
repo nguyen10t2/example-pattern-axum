@@ -2,7 +2,7 @@ use argon2::Argon2;
 use std::sync::Arc;
 
 use crate::{
-    config::{Argon2Config, DatabaseConfig, RedisConfig, constants::MAILER_BUFFER_SIZE},
+    config::{Argon2Config, DatabaseConfig, EmailVerificationConfig, RedisConfig, constants::MAILER_BUFFER_SIZE},
     domain::{
         expenses::{pg::PostgresExpenseRepository, service::ExpenseService},
         groups::{pg::PostgresGroupRepository, service::GroupService},
@@ -87,6 +87,13 @@ impl AppState {
         email_config.validate()?;
         let mailer = Mailer::new(MAILER_BUFFER_SIZE, &email_config);
 
+        // Bypass OTP chỉ dev/test; production (`APP_ENV=production`) thì
+        // `from_env` đã fail-fast ở trên, không thể boot lén.
+        let email_verification = EmailVerificationConfig::from_env()?;
+        if email_verification.is_bypass() {
+            tracing::warn!("SKIP_EMAIL_VERIFICATION=true; OTP email verification bypassed (dev only)");
+        }
+
         let user_service = Arc::new(UserService::new(
             user_repo.clone(),
             cache.clone(),
@@ -94,6 +101,7 @@ impl AppState {
             jwt_config.clone(),
             mailer,
             pool.clone(),
+            email_verification,
         ));
 
         let group_service = Arc::new(GroupService::new(

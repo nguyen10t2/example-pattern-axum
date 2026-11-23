@@ -36,21 +36,45 @@ impl<SR: SettlementRepository, GR: GroupRepository> SettlementService<SR, GR> {
 
     /// Ghi nhận một giao dịch trả nợ, xóa cache summary nhóm.
     ///
+    /// Chỉ sender hoặc receiver được ghi (kể cả ADMIN ngoài cuộc cũng không) —
+    /// member thứ 3 ghi hộ là giả mạo giao dịch của 2 người khác.
+    ///
     /// # Errors
     ///
-    /// Trả `NotGroupMember` khi ngoài nhóm, `UserNotInGroup` khi sender/receiver ngoài nhóm.
+    /// Trả `NotGroupMember` khi ngoài nhóm, `NotSettlementParty` khi actor không
+    /// phải sender/receiver, `UserNotInGroup` khi sender/receiver ngoài nhóm.
     pub async fn create(
         &self,
         data: CreateSettlementRequest,
         current_user_id: Uuid,
     ) -> Result<SettlementResponse, AppError> {
-        let members = member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id).await?;
+        if data.sender_id == data.receiver_id {
+            return Err(AppError::Business(BusinessError::BadRequest("Sender and receiver must differ".into())));
+        }
+
+        let (members, group) =
+            tokio::try_join!(member_entries(&self.cache, &self.pool, &self.group_repo, data.group_id), async {
+                self.group_repo.find_by_id(&self.pool, data.group_id).await.map_err(AppError::from)
+            })?;
+        let group = group.ok_or(AppError::Business(BusinessError::GroupNotFound))?;
+
+        // Như expense: DebtEngine không quy đổi tỉ giá, trộn currency là sai sổ nợ.
+        if data.currency != group.default_currency {
+            return Err(AppError::Business(BusinessError::BadRequest(
+                "Currency must match group default currency".into(),
+            )));
+        }
+
         let member_ids: HashSet<Uuid> = members.iter().map(|m| m.user_id).collect();
 
         let current_member = members.iter().find(|member| member.user_id == current_user_id);
         let Some(current_member) = current_member else {
             return Err(AppError::Business(BusinessError::NotGroupMember));
         };
+
+        if current_user_id != data.sender_id && current_user_id != data.receiver_id {
+            return Err(AppError::Business(BusinessError::NotSettlementParty));
+        }
 
         if !member_ids.contains(&data.sender_id) || !member_ids.contains(&data.receiver_id) {
             return Err(AppError::Business(BusinessError::UserNotInGroup("Sender or receiver".to_string())));

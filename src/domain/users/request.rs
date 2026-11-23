@@ -82,9 +82,9 @@ pub struct ResetPasswordRequest {
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct UpdateUserRequest {
     #[serde(rename = "fullName")]
+    #[validate(length(min = 1, max = 255))]
     pub full_name: Option<String>,
-    #[serde(rename = "isActive")]
-    pub is_active: Option<bool>,
+    #[validate(length(max = 16))]
     pub phone: Option<String>,
     #[serde(rename = "preferredCurrency")]
     pub preferred_currency: Option<Currency>,

@@ -165,6 +165,20 @@ pub struct MockGroupRepository {
     pub members: Arc<Mutex<Vec<GroupMemberWithUser>>>,
 }
 
+/// Seed một group tối thiểu vào mock repo (đủ cho authorize + check currency).
+pub async fn seed_group(repo: &MockGroupRepository, id: Uuid, default_currency: dsa::domain::Currency) {
+    repo.groups.lock().await.push(GroupEntity {
+        id,
+        name: "Mock Group".to_string(),
+        description: None,
+        invite_code: None,
+        default_currency,
+        deleted_at: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    });
+}
+
 #[async_trait]
 impl GroupRepository for MockGroupRepository {
     async fn create<'e, E: Executor<'e, Database = Postgres> + Send>(
@@ -198,15 +212,45 @@ impl GroupRepository for MockGroupRepository {
         &self,
         _executor: E,
         data: &NewGroupMemberEntity,
-    ) -> Result<GroupMemberEntity, sqlx::Error> {
-        self.members.lock().await.push(GroupMemberWithUser {
-            group_id: data.group_id,
-            user_id: data.user_id,
-            full_name: "Mock Member".to_string(),
-            role: data.role,
-            joined_at: Utc::now(),
-        });
-        Ok(GroupMemberEntity { group_id: data.group_id, user_id: data.user_id, role: data.role, joined_at: Utc::now() })
+    ) -> Result<Option<GroupMemberEntity>, sqlx::Error> {
+        let mut members = self.members.lock().await;
+        let result = if let Some(existing) =
+            members.iter_mut().find(|m| m.group_id == data.group_id && m.user_id == data.user_id)
+        {
+            // Đang active: giữ nguyên role, báo "đã là thành viên".
+            if existing.left_at.is_none() {
+                None
+            } else {
+                existing.left_at = None;
+                existing.role = data.role;
+                existing.joined_at = Utc::now();
+                Some(GroupMemberEntity {
+                    group_id: existing.group_id,
+                    user_id: existing.user_id,
+                    role: existing.role,
+                    joined_at: existing.joined_at,
+                    left_at: None,
+                })
+            }
+        } else {
+            members.push(GroupMemberWithUser {
+                group_id: data.group_id,
+                user_id: data.user_id,
+                full_name: "Mock Member".to_string(),
+                role: data.role,
+                left_at: None,
+                joined_at: Utc::now(),
+            });
+            Some(GroupMemberEntity {
+                group_id: data.group_id,
+                user_id: data.user_id,
+                role: data.role,
+                left_at: None,
+                joined_at: Utc::now(),
+            })
+        };
+        drop(members);
+        Ok(result)
     }
 
     async fn find_members<'e, E: Executor<'e, Database = Postgres> + Send>(
@@ -262,18 +306,39 @@ impl GroupRepository for MockGroupRepository {
         Ok(items)
     }
 
-    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+    async fn hard_delete(&self, _pool: &sqlx::PgPool, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error> {
+        let removed = {
+            let mut groups = self.groups.lock().await;
+            let position = groups.iter().position(|g| g.id == id);
+            let removed = position.map(|p| groups.remove(p));
+            drop(groups);
+            removed
+        };
+        self.members.lock().await.retain(|m| m.group_id != id);
+        Ok(removed)
+    }
+    async fn leave_group<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + Send>(
         &self,
         _executor: E,
-        id: Uuid,
-    ) -> Result<Option<GroupEntity>, sqlx::Error> {
-        let mut groups = self.groups.lock().await;
-        if let Some(g) = groups.iter_mut().find(|g| g.id == id && g.deleted_at.is_none()) {
-            g.deleted_at = Some(Utc::now());
-            Ok(Some(g.clone()))
-        } else {
-            Ok(None)
+        group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        {
+            let mut members = self.members.lock().await;
+            if let Some(member) = members.iter_mut().find(|m| m.group_id == group_id && m.user_id == user_id) {
+                member.left_at = Some(Utc::now());
+            }
         }
+        Ok(())
+    }
+    async fn set_member_role<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + Send>(
+        &self,
+        _executor: E,
+        _group_id: Uuid,
+        _user_id: Uuid,
+        _role: dsa::domain::GroupRole,
+    ) -> Result<(), sqlx::Error> {
+        Ok(())
     }
 }
 

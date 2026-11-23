@@ -1,3 +1,4 @@
+#![allow(clippy::unused_async_trait_impl)]
 use axum::{
     extract::{FromRequestParts, Request, State},
     http::{header, request::Parts},
@@ -17,11 +18,16 @@ pub struct AuthUser(pub Uuid);
 
 /// Middleware xác thực Bearer token, nhét `AuthUser` vào request extensions.
 ///
-/// Để async vì axum `from_fn` bắt buộc handler async (I/O thật: đọc header + verify JWT).
+/// Verify JWT **và** trạng thái tài khoản (cache `user_profile_key`, TTL 60s):
+/// token cấp trước khi bị khoá/xoá không được dùng tiếp. Deactivate qua `update`
+/// cũng ghi lại profile cache nên hiệu lực gần như tức thì.
+///
+/// Để async vì axum `from_fn` bắt buộc handler async (I/O thật: verify JWT + đọc cache/DB).
 ///
 /// # Errors
 ///
-/// Trả `Unauthorized` khi thiếu/sai header, token hết hạn hoặc `sub` không phải UUID.
+/// Trả `Unauthorized` khi thiếu/sai header, token hết hạn, `sub` không phải UUID,
+/// hoặc tài khoản đã bị khoá/xoá.
 pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Result<Response, AppError> {
     let auth_header = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
 

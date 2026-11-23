@@ -1,0 +1,6 @@
+# cargo-audit config.
+# RUSTSEC-2026-0459: CVE trong SQLite C của libsqlite3-sys 0.37 — chỉ vào build graph
+# khi bật feature `sqlite` của sqlx (dự án chỉ dùng postgres). sqlx-sqlite 0.9.0 vẫn pin
+# `libsqlite3-sys <0.38`, chưa có bản vá upstream; bỏ ignore khi sqlx nâng constraint.
+[advisories]
+ignore = ["RUSTSEC-2026-0459"]

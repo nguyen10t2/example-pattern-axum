@@ -22,12 +22,16 @@ pub trait GroupRepository: Send + Sync {
         id: Uuid,
     ) -> Result<Option<GroupEntity>, sqlx::Error>;
 
-    /// Thêm thành viên vào nhóm.
+    /// Thêm thành viên vào nhóm; `None` khi user đã là thành viên đang active.
+    ///
+    /// Upsert theo `(group_id, user_id)`: người đã rời (`left_at` khác `NULL`) được
+    /// vào lại với role mới; người đang active giữ nguyên role (không bị invite code
+    /// cũ hạ quyền).
     async fn add_member<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
         executor: E,
         data: &NewGroupMemberEntity,
-    ) -> Result<GroupMemberEntity, sqlx::Error>;
+    ) -> Result<Option<GroupMemberEntity>, sqlx::Error>;
 
     /// Liệt kê thành viên kèm user của nhóm.
     async fn find_members<'e, E: Executor<'e, Database = Postgres> + Send>(
@@ -51,9 +55,23 @@ pub trait GroupRepository: Send + Sync {
     ) -> Result<Vec<GroupWithBalanceEntity>, sqlx::Error>;
 
     /// Xóa mềm nhóm, trả `None` nếu id không tồn tại.
-    async fn soft_delete<'e, E: Executor<'e, Database = Postgres> + Send>(
+    /// Xoá cứng nhóm.
+    /// Đánh dấu user đã rời nhóm.
+    async fn leave_group<'e, E: Executor<'e, Database = Postgres> + Send>(
         &self,
         executor: E,
-        id: Uuid,
-    ) -> Result<Option<GroupEntity>, sqlx::Error>;
+        group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), sqlx::Error>;
+
+    /// Cập nhật vai trò member.
+    async fn set_member_role<'e, E: Executor<'e, Database = Postgres> + Send>(
+        &self,
+        executor: E,
+        group_id: Uuid,
+        user_id: Uuid,
+        role: crate::domain::GroupRole,
+    ) -> Result<(), sqlx::Error>;
+
+    async fn hard_delete(&self, pool: &sqlx::PgPool, id: Uuid) -> Result<Option<GroupEntity>, sqlx::Error>;
 }

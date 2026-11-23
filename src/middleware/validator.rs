@@ -6,9 +6,12 @@ use axum::{
     http::request::Parts,
 };
 use serde::de::DeserializeOwned;
+use tracing::warn;
 use validator::Validate;
 
 use crate::errors::{AppError, BusinessError};
+use crate::middleware::RequestLang;
+use crate::utils::i18n::t_simple;
 
 /// Extractor JSON tự deserialize + validate: sai format → `400`, sai rule → `422`.
 /// Hỗ trợ `Deref`/`DerefMut` để dùng trực tiếp như `T`.
@@ -37,11 +40,17 @@ where
     type Rejection = AppError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let Json(value) = Json::<T>::from_request(req, state)
-            .await
-            .map_err(|e| AppError::Business(BusinessError::BadRequest(e.to_string())))?;
+        let lang = req.extensions().get::<RequestLang>().map(|request_lang| request_lang.0).unwrap_or_default();
 
-        value.validate().map_err(|e| AppError::Business(BusinessError::ValidationError(e.to_string())))?;
+        let Json(value) = Json::<T>::from_request(req, state).await.map_err(|e| {
+            warn!(error = %e, "invalid JSON request body");
+            AppError::Business(BusinessError::BadRequest(t_simple("BAD_REQUEST", lang)))
+        })?;
+
+        value.validate().map_err(|e| {
+            warn!(error = %e, "request body validation failed");
+            AppError::Business(BusinessError::ValidationError(t_simple("VALIDATION_ERROR", lang)))
+        })?;
 
         Ok(Self(value))
     }
@@ -73,9 +82,12 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Path(value) = Path::<T>::from_request_parts(parts, state)
-            .await
-            .map_err(|e| AppError::Business(BusinessError::BadRequest(format!("Invalid path parameter: {e}"))))?;
+        let lang = parts.extensions.get::<RequestLang>().map(|request_lang| request_lang.0).unwrap_or_default();
+
+        let Path(value) = Path::<T>::from_request_parts(parts, state).await.map_err(|e| {
+            warn!(error = %e, "invalid path parameter");
+            AppError::Business(BusinessError::BadRequest(t_simple("BAD_REQUEST", lang)))
+        })?;
 
         Ok(Self(value))
     }
@@ -87,7 +99,6 @@ pub struct ValidatedQuery<T>(pub T);
 
 impl<T> Deref for ValidatedQuery<T> {
     type Target = T;
-
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -107,9 +118,12 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Query(value) = Query::<T>::from_request_parts(parts, state)
-            .await
-            .map_err(|e| AppError::Business(BusinessError::BadRequest(format!("Invalid query parameter: {e}"))))?;
+        let lang = parts.extensions.get::<RequestLang>().map(|request_lang| request_lang.0).unwrap_or_default();
+
+        let Query(value) = Query::<T>::from_request_parts(parts, state).await.map_err(|e| {
+            warn!(error = %e, "invalid query parameter");
+            AppError::Business(BusinessError::BadRequest(t_simple("BAD_REQUEST", lang)))
+        })?;
 
         Ok(Self(value))
     }

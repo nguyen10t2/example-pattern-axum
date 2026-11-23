@@ -1,8 +1,9 @@
+#![allow(clippy::missing_errors_doc)]
 use axum::{
     Router,
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -13,7 +14,7 @@ use crate::{
         RATE_LIMIT_JOIN_GROUP_USER_MAX, RATE_LIMIT_WINDOW,
     },
     domain::groups::{
-        request::{AddMemberRequest, CreateGroupRequest, JoinGroupRequest},
+        request::{AddMemberRequest, ChangeRoleRequest, CreateGroupRequest, JoinGroupRequest},
         response::{GroupMemberResponse, GroupResponse, GroupSummaryResponse},
     },
     errors::{AppError, BusinessError},
@@ -31,6 +32,8 @@ pub fn group_router(state: AppState) -> Router<AppState> {
         .route("/{id}", get(handle_get_group_by_id).delete(handle_delete_group))
         .route("/{id}/summary", get(handle_get_group_summary))
         .route("/{id}/members", get(handle_get_group_members).post(handle_add_group_member))
+        .route("/{id}/leave", post(handle_leave_group))
+        .route("/{id}/members/{user_id}/role", put(handle_change_member_role))
         .route_layer(axum::middleware::from_fn_with_state(state, crate::middleware::require_auth))
 }
 
@@ -188,4 +191,25 @@ pub async fn handle_delete_group(
 ) -> Result<SuccessResponse<()>, AppError> {
     state.group_service.delete_group(id, user_id).await?;
     Ok(SuccessResponse::message_only(t_simple("GROUP_DELETED", lang)))
+}
+
+#[allow(clippy::missing_errors_doc)]
+pub async fn handle_leave_group(
+    State(state): State<AppState>,
+    AuthUser(current_user_id): AuthUser,
+    ValidatedPath(id): ValidatedPath<Uuid>,
+) -> Result<SuccessResponse<()>, AppError> {
+    state.group_service.leave_group(id, current_user_id).await?;
+    Ok(SuccessResponse::ok(()))
+}
+
+#[allow(clippy::missing_errors_doc)]
+pub async fn handle_change_member_role(
+    State(state): State<AppState>,
+    AuthUser(current_user_id): AuthUser,
+    ValidatedPath((id, user_id)): ValidatedPath<(Uuid, Uuid)>,
+    ValidatedJson(payload): ValidatedJson<ChangeRoleRequest>,
+) -> Result<SuccessResponse<()>, AppError> {
+    state.group_service.change_member_role(id, current_user_id, user_id, payload.role).await?;
+    Ok(SuccessResponse::ok(()))
 }

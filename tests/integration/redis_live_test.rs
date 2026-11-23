@@ -147,6 +147,7 @@ async fn test_membership_cache_roundtrip_over_redis() {
         user_id,
         full_name: "Live User".to_string(),
         role: GroupRole::MEMBER,
+        left_at: None,
         joined_at: Utc::now(),
     });
 

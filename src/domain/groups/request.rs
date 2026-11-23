@@ -29,3 +29,8 @@ pub struct AddMemberRequest {
     pub user_id: Uuid,
     pub role: Option<GroupRole>,
 }
+
+#[derive(Debug, Clone, Deserialize, Validate)]
+pub struct ChangeRoleRequest {
+    pub role: GroupRole,
+}

@@ -60,6 +60,9 @@ pub enum BusinessError {
     #[error("{}", error_codes::DELETE_PERMISSION_DENIED)]
     DeletePermissionDenied,
 
+    #[error("{}", error_codes::NOT_SETTLEMENT_PARTY)]
+    NotSettlementParty,
+
     #[error("{}", error_codes::BAD_REQUEST)]
     BadRequest(String),
 
@@ -92,7 +95,8 @@ impl BusinessError {
             | Self::EmailNotVerified
             | Self::NotGroupMember
             | Self::AdminRequired
-            | Self::DeletePermissionDenied => StatusCode::FORBIDDEN,
+            | Self::DeletePermissionDenied
+            | Self::NotSettlementParty => StatusCode::FORBIDDEN,
             Self::UserAlreadyExists
             | Self::InvalidOtp
             | Self::InvalidOldPassword
@@ -135,6 +139,7 @@ impl BusinessError {
             Self::ExpenseNotFound => error_codes::EXPENSE_NOT_FOUND,
             Self::SettlementNotFound => error_codes::SETTLEMENT_NOT_FOUND,
             Self::DeletePermissionDenied => error_codes::DELETE_PERMISSION_DENIED,
+            Self::NotSettlementParty => error_codes::NOT_SETTLEMENT_PARTY,
             Self::BadRequest(_) | Self::InvalidUserId(_) => error_codes::BAD_REQUEST,
             Self::NotFound(_) => error_codes::NOT_FOUND,
             Self::Conflict(_) | Self::DuplicateField { .. } => error_codes::CONFLICT,
