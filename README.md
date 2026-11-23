@@ -39,6 +39,8 @@ Các giá trị tinh chỉnh thêm (đều có mặc định, xem `src/config/co
 | `REDIS_CONNECTION_TIMEOUT` | `5` (giây) | Timeout bắt tay Redis + chặn trên lúc khởi động |
 | `REDIS_RESPONSE_TIMEOUT` | `2` (giây) | Timeout mỗi lệnh Redis |
 | `ARGON2_M_COST` / `ARGON2_T_COST` / `ARGON2_P_COST` | `19456` / `2` / `1` | Tham số băm mật khẩu Argon2id |
+| `COOKIE_SECURE` | `true` | Chỉ gửi cookie xác thực qua HTTPS; đặt `false` rõ ràng khi phát triển bằng HTTP |
+| `TRUSTED_PROXY_IPS` | rỗng | Danh sách IP reverse proxy được phép cung cấp `X-Forwarded-For`, phân tách bằng dấu phẩy |
 
 ## Chạy
 

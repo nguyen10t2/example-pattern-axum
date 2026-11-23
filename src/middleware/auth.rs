@@ -41,13 +41,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
 
     let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::Business(BusinessError::Unauthorized))?;
 
-    let is_active = state
-        .user_service
-        .find_by_id(user_id)
-        .await
-        .map_err(|_| AppError::Business(BusinessError::Unauthorized))?
-        .is_active;
-    if !is_active {
+    if !state.user_service.is_active(user_id).await? {
         return Err(AppError::Business(BusinessError::Unauthorized));
     }
 
@@ -64,6 +58,7 @@ where
 
     // Giữ `async` vì trait `FromRequestParts` của axum bắt buộc — body không có `.await` nào.
     // (Warning `unused_async_trait_impl` ở đây được chấp nhận có lý do, xem PLAN_RUST_HARDENING.md.)
+    #[allow(clippy::unused_async_trait_impl)]
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         parts.extensions.get::<Self>().copied().ok_or(AppError::Business(BusinessError::Unauthorized))
     }
