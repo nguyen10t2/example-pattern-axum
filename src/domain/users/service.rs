@@ -172,6 +172,7 @@ impl<R: UserRepository> UserService<R> {
         };
 
         if !user.is_active {
+            warn!(email = %data.email, user_id = %user.id, "Failed sign-in attempt: Account disabled");
             return Err(AppError::Business(BusinessError::InvalidCredentials));
         }
 
@@ -319,8 +320,11 @@ impl<R: UserRepository> UserService<R> {
 
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AppError::Business(BusinessError::InvalidSession))?;
 
-        if !self.is_active(user_id).await? {
-            self.revoke_family(&claims.sub).await?;
+        // Tài khoản bị xoá/khóa thì token còn hạn cũng không được xoay — revoke
+        // family rồi báo InvalidSession (fail-closed, không để session sống tiếp).
+        let active_user = self.repo.find_by_id(&self.pool, user_id).await?;
+        if !active_user.is_some_and(|user| user.is_active) {
+            self.revoke_sessions(&claims.sub).await?;
             return Err(AppError::Business(BusinessError::InvalidSession));
         }
 
@@ -350,19 +354,7 @@ impl<R: UserRepository> UserService<R> {
         Ok(TokensResponse { access_token: new_access_token, refresh_token: new_refresh_token })
     }
 
-    /// Check whether a token subject still represents an enabled account.
-    ///
-    /// This intentionally reads the source of truth instead of the profile cache,
-    /// so account deactivation takes effect for existing access tokens immediately.
-    ///
-    /// # Errors
-    ///
-    /// Returns a database error when account status cannot be checked.
-    pub async fn is_active(&self, id: Uuid) -> Result<bool, AppError> {
-        Ok(self.repo.find_by_id(&self.pool, id).await?.is_some_and(|user| user.is_active))
-    }
-
-    /// Thu hồi toàn bộ sessions của subject (dùng khi phát hiện replay refresh token).
+    /// Thu hồi toàn bộ sessions của subject (sign-out all, replay, đổi/xoá tài khoản).
     ///
     /// Để `async` vì đọc + xóa Redis là I/O mạng thật.
     ///

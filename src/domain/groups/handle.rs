@@ -1,11 +1,10 @@
 #![allow(clippy::missing_errors_doc)]
 use axum::{
     Router,
-    extract::{ConnectInfo, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
-use std::net::SocketAddr;
 use uuid::Uuid;
 
 use crate::{
@@ -61,10 +60,9 @@ pub async fn handle_create_group(
     RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     headers: HeaderMap,
-    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     ValidatedJson(body): ValidatedJson<CreateGroupRequest>,
 ) -> Result<(StatusCode, SuccessResponse<GroupResponse>), AppError> {
-    let ip = extract_client_ip(&headers, peer_addr.ip()).to_string();
+    let ip = extract_client_ip(&headers);
     if !state
         .rate_limiter
         .check_mixed_limit(
@@ -75,7 +73,7 @@ pub async fn handle_create_group(
             RATE_LIMIT_CREATE_GROUP_IP_MAX,
             RATE_LIMIT_WINDOW,
         )
-        .await?
+        .await
     {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
@@ -94,10 +92,9 @@ pub async fn handle_join_group(
     RequestLang(lang): RequestLang,
     AuthUser(user_id): AuthUser,
     headers: HeaderMap,
-    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     ValidatedJson(body): ValidatedJson<JoinGroupRequest>,
 ) -> Result<SuccessResponse<GroupResponse>, AppError> {
-    let ip = extract_client_ip(&headers, peer_addr.ip()).to_string();
+    let ip = extract_client_ip(&headers);
     if !state
         .rate_limiter
         .check_mixed_limit(
@@ -108,7 +105,7 @@ pub async fn handle_join_group(
             RATE_LIMIT_JOIN_GROUP_IP_MAX,
             RATE_LIMIT_WINDOW,
         )
-        .await?
+        .await
     {
         return Err(AppError::Business(BusinessError::TooManyRequests));
     }
